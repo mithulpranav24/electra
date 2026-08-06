@@ -1,0 +1,6 @@
+[submodule "electra-docs"]
+	path = docs
+	url = https://github.com/mithulpranav24/electra-docs.git
+[submodule "electra-context"]
+	path = context
+	url = https://github.com/mithulpranav24/electra-context.git
