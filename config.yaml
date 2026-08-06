@@ -1,0 +1,19 @@
+# Electra Application Configuration
+
+database:
+  user: postgres
+  password: postgres
+  host: localhost
+  port: 5432
+  name: electra
+
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+
+app:
+  jwt_secret_key: "CHANGE_ME_IN_PRODUCTION"
+  jwt_algorithm: "HS256"
+  jwt_expiration_hours: 24
+  environment: "development"
