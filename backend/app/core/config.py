@@ -6,8 +6,10 @@ class Settings(BaseSettings):
     database_url: str = ""
     redis_url: str = ""
     jwt_secret_key: str = ""
+    jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24
+    jwt_access_token_expire_minutes: int = 60
     environment: str = "development"
 
     class Config:
@@ -33,8 +35,10 @@ def get_settings() -> Settings:
                 app_config = yaml_data.get("app", {})
                 if app_config:
                     settings.jwt_secret_key = app_config.get("jwt_secret_key", settings.jwt_secret_key)
+                    settings.jwt_secret = app_config.get("jwt_secret", settings.jwt_secret_key)
                     settings.jwt_algorithm = app_config.get("jwt_algorithm", settings.jwt_algorithm)
                     settings.jwt_expiration_hours = app_config.get("jwt_expiration_hours", settings.jwt_expiration_hours)
+                    settings.jwt_access_token_expire_minutes = app_config.get("jwt_access_token_expire_minutes", settings.jwt_access_token_expire_minutes)
                     settings.environment = app_config.get("environment", settings.environment)
     except FileNotFoundError:
         pass # Fallback to env vars if yaml not found

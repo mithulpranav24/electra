@@ -21,5 +21,9 @@ app.add_middleware(
 def health_check():
     return {"status": "healthy", "environment": settings.environment}
 
+from app.controllers import auth_controller, user_controller, vehicle_controller
+
 # Routers will be included here as they are developed
-# app.include_router(auth_controller.router, prefix="/api/v1/auth")
+app.include_router(auth_controller.router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(user_controller.router, prefix="/api/v1/users", tags=["users"])
+app.include_router(vehicle_controller.router, prefix="/api/v1/vehicles", tags=["vehicles"])
