@@ -1,8 +1,15 @@
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Clock, Navigation, BatteryCharging, Zap, Wallet } from 'lucide-react';
+import { authService } from '../../services/api';
 
 const Dashboard = () => {
   const { user } = useAuth();
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    authService.getDashboardData().then(setData).catch(console.error);
+  }, []);
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto">
@@ -20,7 +27,7 @@ const Dashboard = () => {
             <span className="text-sm font-semibold">Active Session</span>
             <BatteryCharging size={18} className="text-emerald-500" />
           </div>
-          <p className="text-2xl font-bold text-emerald-500">None</p>
+          <p className="text-2xl font-bold text-emerald-500">{data?.active_sessions || 'None'}</p>
           <p className="text-xs text-skeuo-text-muted">Ready to charge</p>
         </div>
         
@@ -29,7 +36,7 @@ const Dashboard = () => {
             <span className="text-sm font-semibold">Upcoming Booking</span>
             <Clock size={18} className="text-blue-500" />
           </div>
-          <p className="text-xl font-bold">No reservations</p>
+          <p className="text-xl font-bold">{data?.upcoming_bookings || 'No reservations'}</p>
           <p className="text-xs text-skeuo-text-muted">Book a slot now</p>
         </div>
 
@@ -47,7 +54,7 @@ const Dashboard = () => {
             <span className="text-sm font-semibold">Energy Charged</span>
             <Zap size={18} className="text-yellow-500" />
           </div>
-          <p className="text-2xl font-bold">42.5 <span className="text-lg">kWh</span></p>
+          <p className="text-2xl font-bold">{data?.energy_charged_kwh || '0'} <span className="text-lg">kWh</span></p>
           <p className="text-xs text-skeuo-text-muted">This month</p>
         </div>
       </div>
@@ -60,21 +67,26 @@ const Dashboard = () => {
             <button className="text-sm text-skeuo-accent font-semibold hover:underline">View All</button>
           </h2>
           <div className="flex flex-col gap-4">
-            <div className="bg-skeuo-base shadow-skeuo-pressed-sm rounded-xl p-4 border border-white/20 flex items-center justify-between">
-               <div className="flex gap-4 items-center">
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center shadow-inner">
-                    <Zap size={20} />
-                  </div>
-                  <div>
-                    <p className="font-semibold">City Center Mall • Port A</p>
-                    <p className="text-xs text-skeuo-text-muted">Yesterday, 14:30 - 15:45</p>
-                  </div>
-               </div>
-               <div className="text-right">
-                  <p className="font-bold">₹ 450.00</p>
-                  <p className="text-xs text-emerald-500 font-semibold">+24 kWh</p>
-               </div>
-            </div>
+            {data?.recent_activity ? data.recent_activity.map((act: any) => (
+              <div key={act.id} className="bg-skeuo-base shadow-skeuo-pressed-sm rounded-xl p-4 border border-white/20 flex items-center justify-between">
+                 <div className="flex gap-4 items-center">
+                    <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center shadow-inner">
+                      <Zap size={20} />
+                    </div>
+                    <div>
+                      <p className="font-semibold">{act.location}</p>
+                      <p className="text-xs text-skeuo-text-muted">{act.date}</p>
+                    </div>
+                 </div>
+                 <div className="text-right">
+                    <p className="font-bold">{act.amount}</p>
+                    <p className="text-xs text-emerald-500 font-semibold">{act.status}</p>
+                 </div>
+              </div>
+            )) : (
+              <div className="text-center py-4 text-skeuo-text-muted">No recent activity</div>
+            )}
+
             {/* Placeholder for empty state if needed, using hardcoded for feature-dense view */}
             <div className="bg-skeuo-base shadow-skeuo-pressed-sm rounded-xl p-4 border border-white/20 flex items-center justify-between">
                <div className="flex gap-4 items-center">
