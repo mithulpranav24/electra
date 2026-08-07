@@ -39,4 +39,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
         
+    if user.banned_until:
+        from datetime import datetime, timezone
+        if user.banned_until.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+            raise HTTPException(status_code=403, detail="User is banned")
+        
     return user
