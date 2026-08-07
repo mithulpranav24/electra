@@ -33,68 +33,70 @@ body {
   }
 }
 
-.skeuo-panel {
-  @apply bg-skeuo-base rounded-2xl shadow-skeuo border border-white/40;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer components {
   .skeuo-panel {
-    background-color: var(--color-dark-skeuo-base);
-    box-shadow: var(--shadow-dark-skeuo);
-    border-color: rgba(255, 255, 255, 0.05);
+    @apply bg-skeuo-base rounded-2xl shadow-skeuo border border-white/40;
   }
-}
 
-.skeuo-input {
-  @apply bg-skeuo-base shadow-skeuo-pressed rounded-xl px-4 py-3 outline-none text-skeuo-text border border-transparent transition-all;
-}
-.skeuo-input:focus {
-  @apply border-skeuo-accent/50;
-}
+  @media (prefers-color-scheme: dark) {
+    .skeuo-panel {
+      background-color: var(--color-dark-skeuo-base);
+      box-shadow: var(--shadow-dark-skeuo);
+      border-color: rgba(255, 255, 255, 0.05);
+    }
+  }
 
-@media (prefers-color-scheme: dark) {
   .skeuo-input {
-    background-color: var(--color-dark-skeuo-base);
-    box-shadow: var(--shadow-dark-skeuo-pressed);
-    color: #e2e8f0;
+    @apply bg-skeuo-base shadow-skeuo-pressed rounded-xl px-4 py-3 outline-none text-skeuo-text border border-transparent transition-all;
   }
-}
+  .skeuo-input:focus {
+    @apply border-skeuo-accent/50;
+  }
 
-.skeuo-btn {
-  @apply bg-skeuo-base shadow-skeuo rounded-xl px-6 py-3 font-semibold text-skeuo-text transition-all active:shadow-skeuo-pressed active:scale-[0.98] border border-white/40 select-none cursor-pointer flex justify-center items-center gap-2;
-}
-.skeuo-btn-primary {
-  @apply bg-skeuo-accent text-white shadow-[6px_6px_12px_#b3c2d6,-6px_-6px_12px_#ffffff] active:shadow-[inset_4px_4px_8px_rgba(0,0,0,0.2),inset_-4px_-4px_8px_rgba(255,255,255,0.2)] border-blue-400/50;
-}
+  @media (prefers-color-scheme: dark) {
+    .skeuo-input {
+      background-color: var(--color-dark-skeuo-base);
+      box-shadow: var(--shadow-dark-skeuo-pressed);
+      color: #e2e8f0;
+    }
+  }
 
-@media (prefers-color-scheme: dark) {
   .skeuo-btn {
-    background-color: var(--color-dark-skeuo-base);
-    box-shadow: var(--shadow-dark-skeuo);
-    border-color: rgba(255, 255, 255, 0.05);
-    color: #e2e8f0;
-  }
-  .skeuo-btn:active {
-    box-shadow: var(--shadow-dark-skeuo-pressed);
+    @apply bg-skeuo-base shadow-skeuo rounded-xl px-6 py-3 font-semibold text-skeuo-text transition-all active:shadow-skeuo-pressed active:scale-[0.98] border border-white/40 select-none cursor-pointer flex justify-center items-center gap-2;
   }
   .skeuo-btn-primary {
-    @apply bg-skeuo-accent shadow-[4px_4px_10px_rgba(0,0,0,0.5),-4px_-4px_10px_rgba(255,255,255,0.05)];
+    @apply bg-skeuo-accent text-white shadow-[6px_6px_12px_#b3c2d6,-6px_-6px_12px_#ffffff] active:shadow-[inset_4px_4px_8px_rgba(0,0,0,0.2),inset_-4px_-4px_8px_rgba(255,255,255,0.2)] border-blue-400/50;
   }
-  .skeuo-btn-primary:active {
-    @apply shadow-[inset_4px_4px_8px_rgba(0,0,0,0.4),inset_-4px_-4px_8px_rgba(255,255,255,0.1)];
+
+  @media (prefers-color-scheme: dark) {
+    .skeuo-btn {
+      background-color: var(--color-dark-skeuo-base);
+      box-shadow: var(--shadow-dark-skeuo);
+      border-color: rgba(255, 255, 255, 0.05);
+      color: #e2e8f0;
+    }
+    .skeuo-btn:active {
+      box-shadow: var(--shadow-dark-skeuo-pressed);
+    }
+    .skeuo-btn-primary {
+      @apply bg-skeuo-accent shadow-[4px_4px_10px_rgba(0,0,0,0.5),-4px_-4px_10px_rgba(255,255,255,0.05)];
+    }
+    .skeuo-btn-primary:active {
+      @apply shadow-[inset_4px_4px_8px_rgba(0,0,0,0.4),inset_-4px_-4px_8px_rgba(255,255,255,0.1)];
+    }
   }
-}
 
-.skeuo-text-field-group {
-  @apply flex flex-col gap-2 w-full;
-}
+  .skeuo-text-field-group {
+    @apply flex flex-col gap-2 w-full;
+  }
 
-.skeuo-label {
-  @apply text-sm font-medium text-skeuo-text-muted px-1;
-}
-
-@media (prefers-color-scheme: dark) {
   .skeuo-label {
-    @apply text-slate-400;
+    @apply text-sm font-medium text-skeuo-text-muted px-1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .skeuo-label {
+      @apply text-slate-400;
+    }
   }
 }
