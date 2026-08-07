@@ -32,6 +32,13 @@ export const authService = {
     const { data } = await api.get('/users/me');
     return data;
   },
+  updateProfile: async (userData: Partial<User>): Promise<User> => {
+    const { data } = await api.put('/users/me', userData);
+    return data;
+  },
+  deleteAccount: async (): Promise<void> => {
+    await api.delete('/users/me');
+  },
 };
 
 export const vehicleService = {
