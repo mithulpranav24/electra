@@ -1,0 +1,20 @@
+import uuid
+from sqlalchemy import Column
+from sqlalchemy.dialects.postgresql import UUID
+from app.core.database import Base
+
+class Waitlist(Base):
+    __tablename__ = 'waitlist'
+    waitlist_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True))
+    vehicle_id = Column(UUID(as_uuid=True))
+
+class SearchHistory(Base):
+    __tablename__ = 'search_history'
+    search_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True))
+
+class Favorite(Base):
+    __tablename__ = 'favorites'
+    favorite_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True))
