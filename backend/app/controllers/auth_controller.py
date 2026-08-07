@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.security import create_access_token, revoke_token
+from app.core.security import create_access_token, revoke_token, redis_client
 from app.schemas.auth import Token
 from app.schemas.user import UserCreate, UserResponse
 from app.services.auth_service import AuthService
@@ -13,12 +13,25 @@ from app.core.config import settings
 
 router = APIRouter()
 
+def check_rate_limit(request: Request, endpoint: str):
+    if redis_client:
+        client_ip = request.client.host if request.client else "unknown"
+        key = f"rl:{endpoint}:{client_ip}"
+        attempts = redis_client.get(key)
+        if attempts and int(attempts) >= 5:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests")
+        redis_client.incr(key)
+        if not attempts:
+            redis_client.expire(key, 300)
+
 @router.post("/register", response_model=UserResponse)
-def register(user_in: UserCreate, db: Session = Depends(get_db)):
+def register(request: Request, user_in: UserCreate, db: Session = Depends(get_db)):
+    check_rate_limit(request, "register")
     return AuthService.register_user(db, user_in)
 
 @router.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    check_rate_limit(request, "login")
     user = AuthService.authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(

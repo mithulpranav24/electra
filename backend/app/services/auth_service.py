@@ -15,7 +15,9 @@ class AuthService:
         new_user = User(
             email=user.email,
             password_hash=hashed_password,
-            role=user.role or "Driver"
+            role="Driver",
+            full_name=getattr(user, "full_name", user.email.split("@")[0]),
+            phone_number=getattr(user, "phone_number", None)
         )
         db.add(new_user)
         db.commit()

@@ -53,3 +53,11 @@ def delete_vehicle(
     db: Session = Depends(get_db)
 ):
     return VehicleService.soft_delete_vehicle(db, vehicle_id, current_user.user_id)
+
+@router.post("/{vehicle_id}/default", response_model=VehicleResponse)
+def set_default_vehicle(
+    vehicle_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return VehicleService.set_default_vehicle(db, vehicle_id, current_user.user_id)
