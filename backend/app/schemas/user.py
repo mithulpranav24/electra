@@ -5,10 +5,11 @@ from uuid import UUID
 
 class UserBase(BaseModel):
     email: EmailStr
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
-    role: Optional[str] = "Driver"
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
@@ -18,11 +19,17 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     banned_until: Optional[datetime] = None
 
+class UserUpdateSafe(BaseModel):
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
+
 class UserPasswordUpdate(BaseModel):
     old_password: str
     new_password: str = Field(..., min_length=8)
 
 class UserResponse(UserBase):
+    id: UUID = Field(alias="user_id")
     user_id: UUID
     role: str
     wallet_balance: float
@@ -33,3 +40,4 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+        populate_by_name = True
