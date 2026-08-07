@@ -31,11 +31,8 @@ def get_vehicle(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    vehicle = VehicleService.get_vehicle_by_id(db, vehicle_id)
-    if vehicle.user_id != current_user.user_id:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Not authorized")
-    return vehicle
+    return VehicleService.get_vehicle_by_id(db, vehicle_id, current_user.user_id)
+
 
 @router.put("/{vehicle_id}", response_model=VehicleResponse)
 def update_vehicle(
