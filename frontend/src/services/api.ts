@@ -17,22 +17,44 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Unwrap the unified JSON response if it exists
+    if (response.data && typeof response.data === 'object' && 'success' in response.data) {
+      if (response.data.success) {
+        // Replace the response data with the nested data
+        response.data = response.data.data;
+      }
+    }
+    return response;
+  },
   (error: AxiosError) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       window.dispatchEvent(new Event('auth-unauthorized'));
     }
+    
+    // Attempt to parse the unified JSON error structure
+    if (error.response?.data && typeof error.response.data === 'object' && 'message' in error.response.data) {
+      const data = error.response.data as { message: string };
+      error.message = data.message;
+    }
+    
     return Promise.reject(error);
   }
 );
+
 
 export const authService = {
   getCurrentUser: async (): Promise<User> => {
     const { data } = await api.get('/users/me');
     return data;
   },
+  getDashboardData: async (): Promise<any> => {
+    const { data } = await api.get('/users/me/dashboard');
+    return data;
+  },
   updateProfile: async (userData: Partial<User>): Promise<User> => {
+
     const { data } = await api.put('/users/me', userData);
     return data;
   },
