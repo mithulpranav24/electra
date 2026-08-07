@@ -39,6 +39,9 @@ export const authService = {
   deleteAccount: async (): Promise<void> => {
     await api.delete('/users/me');
   },
+  logout: async (): Promise<void> => {
+    await api.post('/auth/logout');
+  },
 };
 
 export const vehicleService = {

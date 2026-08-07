@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Mail, Lock, CreditCard, ArrowRight, ShieldCheck } from 'lucide-react';
+import { api } from '../services/api';
 
 const Register: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -20,22 +21,12 @@ const Register: React.FC = () => {
 
     try {
       // In a real flow, the mock payment would be processed here to tokenize the card.
-      const response = await fetch('/api/v1/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, role: 'Driver' }),
-      });
+      await api.post('/auth/register', { email, password });
       
-      const data = await response.json();
-      
-      if (response.ok) {
-        // Redirect to login after successful registration
-        navigate('/login');
-      } else {
-        setError(data.detail || 'Registration failed');
-      }
-    } catch (err) {
-      setError('An error occurred during registration');
+      // Redirect to login after successful registration
+      navigate('/login');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Registration failed');
     }
   };
 
