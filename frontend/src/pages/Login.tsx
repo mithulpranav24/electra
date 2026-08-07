@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { Lock, Mail, ArrowRight } from 'lucide-react';
+import { api } from '../services/api';
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -15,22 +16,20 @@ const Login: React.FC = () => {
     setError('');
     
     try {
-      const response = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+      const formData = new URLSearchParams();
+      formData.append('username', email);
+      formData.append('password', password);
+
+      const response = await api.post('/auth/login', formData, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
       });
       
-      const data = await response.json();
-      
-      if (response.ok) {
-        login(data.access_token);
-        navigate('/dashboard');
-      } else {
-        setError(data.detail || 'Login failed');
-      }
-    } catch (err) {
-      setError('An error occurred during login');
+      login(response.data.access_token);
+      navigate('/dashboard');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Login failed');
     }
   };
 
