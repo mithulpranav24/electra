@@ -26,7 +26,12 @@ const Register: React.FC = () => {
       // Redirect to login after successful registration
       navigate('/login');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Registration failed');
+      const detail = err.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        setError(detail.map((d: any) => d.msg).join(', '));
+      } else {
+        setError(detail || 'Registration failed');
+      }
     }
   };
 
