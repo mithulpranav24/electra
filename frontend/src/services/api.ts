@@ -91,3 +91,55 @@ export const vehicleService = {
     return data;
   },
 };
+
+export const adminService = {
+  getCompanies: async (): Promise<any[]> => {
+    const { data } = await api.get('/admin/companies');
+    return data;
+  },
+  createCompany: async (companyData: any): Promise<any> => {
+    const { data } = await api.post('/admin/companies', companyData);
+    return data;
+  },
+  updateCompany: async (id: string, companyData: any): Promise<any> => {
+    const { data } = await api.put(`/admin/companies/${id}`, companyData);
+    return data;
+  },
+  getOperators: async (companyId: string): Promise<any[]> => {
+    const { data } = await api.get(`/admin/companies/${companyId}/memberships`);
+    return data;
+  },
+  assignOperator: async (companyId: string, userId: string): Promise<any> => {
+    const { data } = await api.post('/admin/companies/memberships', { company_id: companyId, user_id: userId });
+    return data;
+  }
+};
+
+export const operatorService = {
+  getStations: async (companyId: string): Promise<any[]> => {
+    const { data } = await api.get(`/operator/stations/company/${companyId}`);
+    return data;
+  },
+  createStation: async (companyId: string, stationData: any): Promise<any> => {
+    const { data } = await api.post(`/operator/stations/company/${companyId}`, stationData);
+    return data;
+  },
+  updateStation: async (id: string, stationData: any): Promise<any> => {
+    const { data } = await api.put(`/operator/stations/${id}`, stationData);
+    return data;
+  },
+  deleteStation: async (id: string): Promise<void> => {
+    await api.delete(`/operator/stations/${id}`);
+  },
+  createPort: async (stationId: string, portData: any): Promise<any> => {
+    const { data } = await api.post(`/operator/stations/${stationId}/ports`, portData);
+    return data;
+  },
+  updatePort: async (portId: string, portData: any): Promise<any> => {
+    const { data } = await api.put(`/operator/stations/ports/${portId}`, portData);
+    return data;
+  },
+  deletePort: async (portId: string): Promise<void> => {
+    await api.delete(`/operator/stations/ports/${portId}`);
+  }
+};
