@@ -253,3 +253,41 @@ CREATE TABLE FAULT_EXEMPTION_CLAIMS (
     claimed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_fault_exemption_user_time ON FAULT_EXEMPTION_CLAIMS(user_id, claimed_at);
+-- Phase 3.5: Internal Wallet Ledger System
+CREATE TABLE PAYMENT_METHODS (
+    payment_method_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES USERS(user_id) ON DELETE CASCADE,
+    card_last4 VARCHAR(4) NOT NULL,
+    expiry_month INT NOT NULL,
+    expiry_year INT NOT NULL,
+    is_default BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE WALLET_TRANSACTIONS (
+    transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES USERS(user_id) ON DELETE CASCADE,
+    amount DECIMAL(10, 2) NOT NULL,
+    transaction_type VARCHAR(50) NOT NULL, -- 'Top-Up', 'Escrow Hold', 'Escrow Release', 'Session Payment', 'Penalty', 'Welcome Bonus'
+    reference_id UUID, -- Can link to reservation_id, session_id, etc.
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Trigger to maintain USERS.wallet_balance exactly equal to sum of WALLET_TRANSACTIONS
+CREATE OR REPLACE FUNCTION update_wallet_balance_from_transactions()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE USERS
+    SET wallet_balance = (
+        SELECT COALESCE(SUM(amount), 0)
+        FROM WALLET_TRANSACTIONS
+        WHERE user_id = NEW.user_id
+    )
+    WHERE user_id = NEW.user_id;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_wallet_balance
+AFTER INSERT OR UPDATE OR DELETE ON WALLET_TRANSACTIONS
+FOR EACH ROW EXECUTE FUNCTION update_wallet_balance_from_transactions();

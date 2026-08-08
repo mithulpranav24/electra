@@ -240,8 +240,8 @@ BEGIN
 
     -- Update state
     UPDATE CHARGING_PORTS SET status = 'Reserved' WHERE port_id = p_port_id;
-    UPDATE USERS SET wallet_balance = wallet_balance - 1000 WHERE user_id = p_user_id;
-
+    -- UPDATE USERS SET wallet_balance = wallet_balance - 1000 WHERE user_id = p_user_id;
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (p_user_id, -1000, 'Escrow Hold');
     -- Tier 3.5: Delete waitlist if exists (returning row to caller not strictly possible in standard SP without OUT params, but we just delete it)
     DELETE FROM WAITLIST WHERE user_id = p_user_id;
 
@@ -363,9 +363,8 @@ BEGIN
     -- Update state
     UPDATE CHARGING_PORTS SET status = 'Reserved' WHERE port_id = p_port_id;
     
-    -- Safe deduct to prevent race conditions during waitlist confirmation
-    UPDATE USERS SET wallet_balance = wallet_balance - 1000 WHERE user_id = p_user_id AND wallet_balance >= 1000;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Negative wallet balance race condition detected'; END IF;
+    -- Escrow update
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (p_user_id, -1000, 'Escrow Hold');
 
     -- Tier 4: Reservations
     INSERT INTO RESERVATIONS (user_id, vehicle_id, port_id, status, waitlist_joined_at, reserved_tariff)
@@ -467,7 +466,10 @@ BEGIN
     END IF;
 
     -- Escrow deduct
-    UPDATE USERS SET wallet_balance = v_user_wallet_balance - (v_secondary_cost + 1000) WHERE user_id = p_user_id;
+    -- UPDATE USERS SET wallet_balance = v_user_wallet_balance - (v_secondary_cost + 1000) WHERE user_id = p_user_id;
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, 1000, 'Escrow Release', p_reservation_id);
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -v_secondary_cost, 'Session Payment', p_reservation_id);
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -1000, 'Escrow Hold', p_reservation_id);
     UPDATE RESERVATIONS SET status = 'Active' WHERE reservation_id = p_reservation_id;
     UPDATE CHARGING_PORTS SET status = 'Charging' WHERE port_id = v_port_id;
 
