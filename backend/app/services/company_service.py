@@ -71,3 +71,10 @@ class CompanyService:
     @staticmethod
     def get_operators(db: Session, company_id: str):
         return db.query(CompanyOperatorMembership).filter(CompanyOperatorMembership.company_id == company_id).all()
+
+    @staticmethod
+    def get_operator_companies(db: Session, user_id: str):
+        return db.query(CompanyOperatorMembership).filter(
+            CompanyOperatorMembership.user_id == user_id,
+            CompanyOperatorMembership.is_active == True
+        ).all()

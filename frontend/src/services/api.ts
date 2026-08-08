@@ -49,6 +49,10 @@ export const authService = {
     const { data } = await api.get('/users/me');
     return data;
   },
+  getMyCompanies: async (): Promise<any[]> => {
+    const { data } = await api.get('/users/me/companies');
+    return data;
+  },
   getDashboardData: async (): Promise<any> => {
     const { data } = await api.get('/users/me/dashboard');
     return data;

@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { adminService } from '../../services/api';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 
 export default function AdminDashboard() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [newCompanyName, setNewCompanyName] = useState('');
   const [assignData, setAssignData] = useState({ companyId: '', userId: '' });
   const navigate = useNavigate();
+  const { logout } = useAuth();
 
   const loadCompanies = async () => {
     try {
@@ -54,9 +56,14 @@ export default function AdminDashboard() {
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-600">Admin Dashboard</h1>
           <p className="text-skeuo-text-muted mt-2">Manage Companies and Operators</p>
         </div>
-        <button className="skeuo-btn" onClick={() => navigate('/driver/dashboard')}>
-          Back to Main
-        </button>
+        <div className="flex gap-4">
+          <button className="skeuo-btn" onClick={() => navigate('/driver/dashboard')}>
+            Back to Main
+          </button>
+          <button className="skeuo-btn text-red-500 font-semibold" onClick={logout}>
+            Logout
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

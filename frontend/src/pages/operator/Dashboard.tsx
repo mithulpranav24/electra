@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { operatorService } from '../../services/api';
+import { operatorService, authService } from '../../services/api';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -30,8 +31,8 @@ function LocationMarker({ position, setPosition }: { position: [number, number],
 
 export default function OperatorDashboard() {
   const [stations, setStations] = useState<any[]>([]);
-  // We mock the companyId since operator belongs to a company. In reality, fetch from context/user profile
-  const [companyId] = useState<string>('00000000-0000-0000-0000-000000000000'); 
+  const [companyId, setCompanyId] = useState<string>(''); 
+  const { logout } = useAuth();
   
   const [newStation, setNewStation] = useState({
     name: '',
@@ -51,11 +52,10 @@ export default function OperatorDashboard() {
 
   const navigate = useNavigate();
 
-  const loadStations = async () => {
-    // Attempt to load stations if we know the company ID, we'll just bypass for demo if it fails
+  const loadStations = async (cId: string) => {
     try {
-      if (companyId && companyId !== '00000000-0000-0000-0000-000000000000') {
-        const data = await operatorService.getStations(companyId);
+      if (cId) {
+        const data = await operatorService.getStations(cId);
         setStations(data);
       }
     } catch (error) {
@@ -64,8 +64,20 @@ export default function OperatorDashboard() {
   };
 
   useEffect(() => {
-    loadStations();
-  }, [companyId]);
+    const fetchCompanies = async () => {
+      try {
+        const comps = await authService.getMyCompanies();
+        if (comps && comps.length > 0) {
+          const firstCompanyId = comps[0].company_id;
+          setCompanyId(firstCompanyId);
+          loadStations(firstCompanyId);
+        }
+      } catch (err) {
+        console.error("Failed to fetch companies", err);
+      }
+    };
+    fetchCompanies();
+  }, []);
 
   const handleCreateStation = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,7 +89,7 @@ export default function OperatorDashboard() {
       };
       await operatorService.createStation(companyId, payload);
       alert('Station created!');
-      loadStations();
+      loadStations(companyId);
     } catch (error) {
       console.error('Failed to create station', error);
       alert('Error creating station. Make sure you belong to the company ID used.');
@@ -90,7 +102,7 @@ export default function OperatorDashboard() {
     try {
       await operatorService.createPort(newPort.station_id, newPort);
       alert('Port created!');
-      loadStations();
+      loadStations(companyId);
       setNewPort({ ...newPort, qr_code: '' });
     } catch (error) {
       console.error('Failed to create port', error);
@@ -102,7 +114,7 @@ export default function OperatorDashboard() {
     if(!window.confirm("Delete this station?")) return;
     try {
       await operatorService.deleteStation(id);
-      loadStations();
+      loadStations(companyId);
     } catch(e) { alert('Error deleting station'); }
   };
   
@@ -110,7 +122,7 @@ export default function OperatorDashboard() {
     if(!window.confirm("Delete this port?")) return;
     try {
       await operatorService.deletePort(id);
-      loadStations();
+      loadStations(companyId);
     } catch(e) { alert('Error deleting port'); }
   };
 
@@ -121,9 +133,14 @@ export default function OperatorDashboard() {
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-500 to-teal-600">Operator Dashboard</h1>
           <p className="text-skeuo-text-muted mt-2">Manage Stations and Charging Ports</p>
         </div>
-        <button className="skeuo-btn" onClick={() => navigate('/driver/dashboard')}>
-          Back to Main
-        </button>
+        <div className="flex gap-4">
+          <button className="skeuo-btn" onClick={() => navigate('/driver/dashboard')}>
+            Back to Main
+          </button>
+          <button className="skeuo-btn text-red-500 font-semibold" onClick={logout}>
+            Logout
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
