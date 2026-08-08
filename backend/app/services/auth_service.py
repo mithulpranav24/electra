@@ -22,6 +22,19 @@ class AuthService:
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
+
+        # Insert a default mock payment method
+        from app.models.wallet import PaymentMethod
+        mock_payment = PaymentMethod(
+            user_id=new_user.user_id,
+            card_last4="4242",
+            expiry_month=12,
+            expiry_year=2030,
+            is_default=True
+        )
+        db.add(mock_payment)
+        db.commit()
+
         return new_user
 
     @staticmethod
