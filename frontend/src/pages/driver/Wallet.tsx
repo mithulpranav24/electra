@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../../../services/api';
+import { api } from '../../services/api';
 import { CreditCard, Wallet as WalletIcon, ArrowUpRight, Clock, Plus } from 'lucide-react';
 
 interface Transaction {
@@ -90,7 +90,7 @@ const Wallet: React.FC = () => {
                 <input
                   type="number"
                   min="100"
-                  step="100"
+                  step="1"
                   value={topupAmount}
                   onChange={(e) => setTopupAmount(e.target.value)}
                   className="skeuo-input pl-8 w-full"
