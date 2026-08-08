@@ -20,3 +20,5 @@ class User(Base):
     created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
 
     vehicles = relationship("Vehicle", back_populates="user")
+    payment_methods = relationship("PaymentMethod", back_populates="user")
+    wallet_transactions = relationship("WalletTransaction", back_populates="user")

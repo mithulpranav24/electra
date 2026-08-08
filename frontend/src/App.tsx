@@ -7,6 +7,7 @@ import DriverLayout from './components/DriverLayout';
 import Dashboard from './pages/driver/Dashboard';
 import Vehicles from './pages/driver/Vehicles';
 import Profile from './pages/driver/Profile';
+import Wallet from './pages/driver/Wallet';
 
 // Global loading screen during auth init
 const GlobalLoader = () => (
@@ -70,6 +71,7 @@ function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="vehicles" element={<Vehicles />} />
             <Route path="profile" element={<Profile />} />
+            <Route path="wallet" element={<Wallet />} />
             <Route path="*" element={<Navigate to="/driver/dashboard" replace />} />
           </Route>
 
