@@ -2,7 +2,7 @@ import uuid
 from sqlalchemy import Column, String, Boolean, Numeric, DateTime, Time, ForeignKey, func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
-from geoalchemy2 import Geometry
+from geoalchemy2 import Geography
 from app.core.database import Base
 
 class Area(Base):
@@ -19,7 +19,7 @@ class Station(Base):
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.company_id", ondelete="RESTRICT"), nullable=False)
     area_id = Column(UUID(as_uuid=True), ForeignKey("areas.area_id", ondelete="SET NULL"), nullable=True)
     name = Column(String(255), nullable=False)
-    gps_coordinates = Column(Geometry(geometry_type='POINT', srid=4326), nullable=False)
+    gps_coordinates = Column(Geography(geometry_type='POINT', srid=4326), nullable=False)
     price_per_kwh = Column(Numeric(10, 2), nullable=False)
     minimum_session_fee = Column(Numeric(10, 2), nullable=False, default=0.00)
     opening_time_local = Column(Time, nullable=True)
