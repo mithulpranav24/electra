@@ -104,7 +104,7 @@ const Register: React.FC = () => {
             </h3>
             <p className="text-xs text-skeuo-text-muted mb-4">
               To guarantee recovery of penalties and enable reservations, a valid card is required. 
-              <br/>(Phase 2: This is a visual placeholder to be integrated in Phase 3).
+              <br/>(A default card will be automatically added to initialize your wallet).
             </p>
             <div className="skeuo-text-field-group">
               <input
