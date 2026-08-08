@@ -45,3 +45,13 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             raise HTTPException(status_code=403, detail="User is banned")
         
     return user
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Not enough permissions. Admin role required.")
+    return current_user
+
+def require_operator(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role not in ["Operator", "Admin"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions. Operator role required.")
+    return current_user

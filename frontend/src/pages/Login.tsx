@@ -29,7 +29,12 @@ const Login: React.FC = () => {
       login(response.data.access_token);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Login failed');
+      const detail = err.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        setError(detail.map((d: any) => d.msg).join(', '));
+      } else {
+        setError(detail || 'Login failed');
+      }
     }
   };
 

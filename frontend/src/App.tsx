@@ -9,6 +9,9 @@ import Vehicles from './pages/driver/Vehicles';
 import Profile from './pages/driver/Profile';
 import Wallet from './pages/driver/Wallet';
 
+import AdminDashboard from './pages/admin/Dashboard';
+import OperatorDashboard from './pages/operator/Dashboard';
+
 // Global loading screen during auth init
 const GlobalLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-skeuo-base">
@@ -75,9 +78,9 @@ function App() {
             <Route path="*" element={<Navigate to="/driver/dashboard" replace />} />
           </Route>
 
-          {/* Placeholders for other roles */}
-          <Route path="/operator/*" element={<RoleProtectedRoute allowedRole="Operator"><div className="p-10 text-center">Operator Dashboard coming in Phase 4</div></RoleProtectedRoute>} />
-          <Route path="/admin/*" element={<RoleProtectedRoute allowedRole="Admin"><div className="p-10 text-center">Admin Dashboard coming in Phase 4</div></RoleProtectedRoute>} />
+          {/* Operator and Admin Routes */}
+          <Route path="/operator/dashboard" element={<RoleProtectedRoute allowedRole="Operator"><OperatorDashboard /></RoleProtectedRoute>} />
+          <Route path="/admin/dashboard" element={<RoleProtectedRoute allowedRole="Admin"><AdminDashboard /></RoleProtectedRoute>} />
           
           <Route path="/" element={<RootRouter />} />
           <Route path="*" element={<RootRouter />} />

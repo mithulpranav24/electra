@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../../../services/api';
+import { api } from '../../services/api';
 import { CreditCard, Wallet as WalletIcon, ArrowUpRight, Clock, Plus } from 'lucide-react';
 
 interface Transaction {
@@ -31,9 +31,9 @@ const Wallet: React.FC = () => {
         api.get('/wallet/transactions'),
         api.get('/wallet/payment-methods')
       ]);
-      setBalance(balanceRes.data.data.balance);
-      setTransactions(transRes.data.data);
-      setPaymentMethods(pmRes.data.data);
+      setBalance(balanceRes.data.balance);
+      setTransactions(transRes.data);
+      setPaymentMethods(pmRes.data);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to load wallet data');
     } finally {
@@ -90,7 +90,7 @@ const Wallet: React.FC = () => {
                 <input
                   type="number"
                   min="100"
-                  step="100"
+                  step="1"
                   value={topupAmount}
                   onChange={(e) => setTopupAmount(e.target.value)}
                   className="skeuo-input pl-8 w-full"
