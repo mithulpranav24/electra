@@ -59,14 +59,15 @@ app.add_middleware(
 def health_check():
     return {"status": "healthy", "environment": settings.environment}
 
-from app.controllers import auth_controller, user_controller, vehicle_controller
+from app.controllers import auth_controller, user_controller, vehicle_controller, wallet_controller
 
 # Routers will be included here as they are developed
 auth_controller.router.route_class = UniformResponseRoute
 user_controller.router.route_class = UniformResponseRoute
 vehicle_controller.router.route_class = UniformResponseRoute
+wallet_controller.router.route_class = UniformResponseRoute
 
 app.include_router(auth_controller.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(user_controller.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(vehicle_controller.router, prefix="/api/v1/vehicles", tags=["vehicles"])
-
+app.include_router(wallet_controller.router, prefix="/api/v1/wallet", tags=["wallet"])

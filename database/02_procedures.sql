@@ -166,6 +166,7 @@ DECLARE
     v_unpaid_invoices INT;
     v_waitlist_offer INT;
     v_deleted_waitlist_row WAITLIST%ROWTYPE;
+    v_new_reservation_id UUID;
 BEGIN
     -- Tier 1: Companies > Stations
     SELECT s.company_id, s.station_id INTO v_company_id, v_station_id
@@ -240,14 +241,16 @@ BEGIN
 
     -- Update state
     UPDATE CHARGING_PORTS SET status = 'Reserved' WHERE port_id = p_port_id;
-    UPDATE USERS SET wallet_balance = wallet_balance - 1000 WHERE user_id = p_user_id;
-
-    -- Tier 3.5: Delete waitlist if exists (returning row to caller not strictly possible in standard SP without OUT params, but we just delete it)
+    -- Tier 3.5: Delete waitlist if exists
     DELETE FROM WAITLIST WHERE user_id = p_user_id;
 
     -- Tier 4: Reservations
     INSERT INTO RESERVATIONS (user_id, vehicle_id, port_id, status, reserved_tariff)
-    VALUES (p_user_id, p_vehicle_id, p_port_id, 'Confirmed', v_station_price_per_kwh);
+    VALUES (p_user_id, p_vehicle_id, p_port_id, 'Confirmed', v_station_price_per_kwh)
+    RETURNING reservation_id INTO v_new_reservation_id;
+
+    -- UPDATE USERS SET wallet_balance = wallet_balance - 1000 WHERE user_id = p_user_id;
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -1000, 'Escrow Hold', v_new_reservation_id);
 
 END;
 $$;
@@ -291,6 +294,7 @@ DECLARE
     v_active_sessions INT;
     v_unpaid_invoices INT;
     v_vehicle_id UUID;
+    v_new_reservation_id UUID;
 BEGIN
     -- Tier 1: Companies > Stations
     SELECT s.company_id, s.station_id INTO v_company_id, v_station_id
@@ -363,13 +367,13 @@ BEGIN
     -- Update state
     UPDATE CHARGING_PORTS SET status = 'Reserved' WHERE port_id = p_port_id;
     
-    -- Safe deduct to prevent race conditions during waitlist confirmation
-    UPDATE USERS SET wallet_balance = wallet_balance - 1000 WHERE user_id = p_user_id AND wallet_balance >= 1000;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Negative wallet balance race condition detected'; END IF;
-
     -- Tier 4: Reservations
     INSERT INTO RESERVATIONS (user_id, vehicle_id, port_id, status, waitlist_joined_at, reserved_tariff)
-    VALUES (p_user_id, v_vehicle_id, p_port_id, 'Confirmed', v_waitlist_joined_at, LEAST(v_waitlist_joined_tariff, v_station_price_per_kwh));
+    VALUES (p_user_id, v_vehicle_id, p_port_id, 'Confirmed', v_waitlist_joined_at, LEAST(v_waitlist_joined_tariff, v_station_price_per_kwh))
+    RETURNING reservation_id INTO v_new_reservation_id;
+
+    -- Escrow update
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -1000, 'Escrow Hold', v_new_reservation_id);
 
     DELETE FROM WAITLIST WHERE waitlist_id = p_waitlist_id;
 
@@ -467,7 +471,10 @@ BEGIN
     END IF;
 
     -- Escrow deduct
-    UPDATE USERS SET wallet_balance = v_user_wallet_balance - (v_secondary_cost + 1000) WHERE user_id = p_user_id;
+    -- UPDATE USERS SET wallet_balance = v_user_wallet_balance - (v_secondary_cost + 1000) WHERE user_id = p_user_id;
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, 1000, 'Escrow Release', p_reservation_id);
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -v_secondary_cost, 'Session Payment', p_reservation_id);
+    INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -1000, 'Escrow Hold', p_reservation_id);
     UPDATE RESERVATIONS SET status = 'Active' WHERE reservation_id = p_reservation_id;
     UPDATE CHARGING_PORTS SET status = 'Charging' WHERE port_id = v_port_id;
 

@@ -15,6 +15,7 @@ const DriverLayout = () => {
     { to: '/driver/dashboard', icon: <LayoutDashboard size={20} />, label: 'Overview' },
     { to: '/driver/vehicles', icon: <Car size={20} />, label: 'My Vehicles' },
     { to: '/driver/sessions', icon: <Zap size={20} />, label: 'Charging Sessions' },
+    { to: '/driver/wallet', icon: <Wallet size={20} />, label: 'Wallet & Billing' },
     { to: '/driver/profile', icon: <UserIcon size={20} />, label: 'Profile' },
   ];
 
