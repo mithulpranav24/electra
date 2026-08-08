@@ -31,9 +31,9 @@ const Wallet: React.FC = () => {
         api.get('/wallet/transactions'),
         api.get('/wallet/payment-methods')
       ]);
-      setBalance(balanceRes.data.data.balance);
-      setTransactions(transRes.data.data);
-      setPaymentMethods(pmRes.data.data);
+      setBalance(balanceRes.data.balance);
+      setTransactions(transRes.data);
+      setPaymentMethods(pmRes.data);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to load wallet data');
     } finally {
