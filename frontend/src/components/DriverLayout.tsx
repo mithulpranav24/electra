@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Car, LayoutDashboard, LogOut, User as UserIcon, Zap, Wallet } from 'lucide-react';
+import { Car, LayoutDashboard, LogOut, User as UserIcon, Zap, Wallet, Search } from 'lucide-react';
 
 const DriverLayout = () => {
   const { user, logout } = useAuth();
@@ -13,6 +13,7 @@ const DriverLayout = () => {
 
   const navItems = [
     { to: '/driver/dashboard', icon: <LayoutDashboard size={20} />, label: 'Overview' },
+    { to: '/driver/search', icon: <Search size={20} />, label: 'Find Stations' },
     { to: '/driver/vehicles', icon: <Car size={20} />, label: 'My Vehicles' },
     { to: '/driver/sessions', icon: <Zap size={20} />, label: 'Charging Sessions' },
     { to: '/driver/wallet', icon: <Wallet size={20} />, label: 'Wallet & Billing' },
