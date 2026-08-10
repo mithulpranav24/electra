@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import api from '../../services/api';
-import { MapPin, Zap, Clock, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { api } from '../../services/api';
+import { MapPin, Zap, Clock, ArrowLeft } from 'lucide-react';
 import { ReservationModal } from '../../components/ReservationModal';
 
 export const StationDetails: React.FC = () => {

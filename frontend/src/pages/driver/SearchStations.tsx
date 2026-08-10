@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import api from '../../services/api';
+import { api } from '../../services/api';
 import { Search, MapPin, Zap, Filter } from 'lucide-react';
 
 // Fix Leaflet default icon issue in React
