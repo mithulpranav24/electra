@@ -8,6 +8,8 @@ import Dashboard from './pages/driver/Dashboard';
 import Vehicles from './pages/driver/Vehicles';
 import Profile from './pages/driver/Profile';
 import Wallet from './pages/driver/Wallet';
+import { SearchStations } from './pages/driver/SearchStations';
+import { StationDetails } from './pages/driver/StationDetails';
 
 import AdminDashboard from './pages/admin/Dashboard';
 import OperatorDashboard from './pages/operator/Dashboard';
@@ -75,6 +77,8 @@ function App() {
             <Route path="vehicles" element={<Vehicles />} />
             <Route path="profile" element={<Profile />} />
             <Route path="wallet" element={<Wallet />} />
+            <Route path="search" element={<SearchStations />} />
+            <Route path="station/:id" element={<StationDetails />} />
             <Route path="*" element={<Navigate to="/driver/dashboard" replace />} />
           </Route>
 
