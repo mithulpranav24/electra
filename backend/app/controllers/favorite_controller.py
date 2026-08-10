@@ -7,10 +7,10 @@ from uuid import UUID
 from datetime import datetime
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.models.station import Station
-from app.models.favorite import Favorite
+from app.models.transient import Favorite
 from app.schemas.station import StationResponse
 from app.services.station_service import StationService
 
