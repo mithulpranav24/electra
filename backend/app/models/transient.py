@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column
+from sqlalchemy import Column, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database import Base
 
@@ -18,3 +18,5 @@ class Favorite(Base):
     __tablename__ = 'favorites'
     favorite_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True))
+    station_id = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
