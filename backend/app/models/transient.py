@@ -20,3 +20,10 @@ class Favorite(Base):
     user_id = Column(UUID(as_uuid=True))
     station_id = Column(UUID(as_uuid=True))
     created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+class RecentStation(Base):
+    __tablename__ = 'recent_stations'
+    recent_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True))
+    station_id = Column(UUID(as_uuid=True))
+    viewed_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
