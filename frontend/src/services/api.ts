@@ -147,3 +147,25 @@ export const operatorService = {
     await api.delete(`/operator/stations/ports/${portId}`);
   }
 };
+
+export const searchService = {
+  getRecentStations: async (): Promise<any[]> => {
+    const { data } = await api.get('/search/recent');
+    return data;
+  }
+};
+
+export const favoriteService = {
+  getFavorites: async (): Promise<any[]> => {
+    const { data } = await api.get('/favorites');
+    return data;
+  },
+  addFavorite: async (stationId: string): Promise<any> => {
+    const { data } = await api.post(`/favorites/${stationId}`);
+    return data;
+  },
+  removeFavorite: async (stationId: string): Promise<any> => {
+    const { data } = await api.delete(`/favorites/${stationId}`);
+    return data;
+  }
+};

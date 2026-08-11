@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api } from '../../services/api';
-import { MapPin, Zap, Clock, ArrowLeft } from 'lucide-react';
+import { api, favoriteService } from '../../services/api';
+import { MapPin, Zap, Clock, ArrowLeft, Heart } from 'lucide-react';
 import { ReservationModal } from '../../components/ReservationModal';
 
 export const StationDetails: React.FC = () => {
@@ -15,6 +15,8 @@ export const StationDetails: React.FC = () => {
   const [selectedPort, setSelectedPort] = useState<any>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [reserving, setReserving] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [togglingFavorite, setTogglingFavorite] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -32,6 +34,13 @@ export const StationDetails: React.FC = () => {
         
         if (vehiclesRes.data.success) {
           setVehicles(vehiclesRes.data.data);
+        }
+
+        // Check favorite status
+        const favRes = await favoriteService.getFavorites();
+        if (favRes && Array.isArray(favRes)) {
+           const isFav = favRes.some((f: any) => f.station_id === id);
+           setIsFavorite(isFav);
         }
       } catch (err: any) {
         setError('Failed to load details');
@@ -74,6 +83,24 @@ export const StationDetails: React.FC = () => {
     }
   };
 
+  const handleToggleFavorite = async () => {
+    if (!id) return;
+    setTogglingFavorite(true);
+    try {
+      if (isFavorite) {
+        await favoriteService.removeFavorite(id);
+        setIsFavorite(false);
+      } else {
+        await favoriteService.addFavorite(id);
+        setIsFavorite(true);
+      }
+    } catch (err: any) {
+      alert("Failed to update favorite status");
+    } finally {
+      setTogglingFavorite(false);
+    }
+  };
+
   if (loading) return <div className="p-8 text-center text-gray-500">Loading...</div>;
   if (error) return <div className="p-8 text-center text-red-500">{error}</div>;
   if (!station) return <div className="p-8 text-center">Station not found</div>;
@@ -88,7 +115,16 @@ export const StationDetails: React.FC = () => {
       </button>
 
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">{station.name}</h1>
+        <div className="flex justify-between items-start mb-2">
+          <h1 className="text-3xl font-bold text-gray-800">{station.name}</h1>
+          <button 
+            onClick={handleToggleFavorite}
+            disabled={togglingFavorite}
+            className={`p-2 rounded-full transition-colors ${isFavorite ? 'bg-red-50 text-red-500' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-red-400'}`}
+          >
+            <Heart className="w-6 h-6" fill={isFavorite ? "currentColor" : "none"} />
+          </button>
+        </div>
         
         <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-6">
           <span className="flex items-center gap-1">
