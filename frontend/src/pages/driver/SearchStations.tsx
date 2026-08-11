@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { api } from '../../services/api';
-import { Search, MapPin, Zap, Filter } from 'lucide-react';
+import { api, searchService, favoriteService } from '../../services/api';
+import { Search, MapPin, Zap, Filter, History, Heart } from 'lucide-react';
 
 // Fix Leaflet default icon issue in React
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -25,6 +25,8 @@ interface Station {
 
 export const SearchStations: React.FC = () => {
   const [stations, setStations] = useState<Station[]>([]);
+  const [recentStations, setRecentStations] = useState<Station[]>([]);
+  const [favorites, setFavorites] = useState<any[]>([]);
   const [radius, setRadius] = useState(10);
   const [connectorType, setConnectorType] = useState('');
   const [loading, setLoading] = useState(false);
@@ -59,6 +61,10 @@ export const SearchStations: React.FC = () => {
 
   useEffect(() => {
     handleSearch();
+    
+    // Fetch recents and favorites
+    searchService.getRecentStations().then(setRecentStations).catch(console.error);
+    favoriteService.getFavorites().then(setFavorites).catch(console.error);
   }, []);
 
   return (
@@ -147,6 +153,50 @@ export const SearchStations: React.FC = () => {
             </Marker>
           ))}
         </MapContainer>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <History className="w-5 h-5 text-gray-500" /> Recent Stations
+          </h2>
+          {recentStations.length > 0 ? (
+            <ul className="space-y-3">
+              {recentStations.map(station => (
+                <li key={station.station_id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer" onClick={() => navigate(`/driver/station/${station.station_id}`)}>
+                  <div>
+                    <h3 className="font-semibold text-gray-800">{station.name}</h3>
+                    <span className="text-xs text-gray-500 flex items-center gap-1"><Zap className="w-3 h-3 text-yellow-500" /> ₹{station.price_per_kwh}/kWh</span>
+                  </div>
+                  <span className="text-sm font-medium text-emerald-600">View</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-gray-500">No recently viewed stations.</p>
+          )}
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <Heart className="w-5 h-5 text-red-500" /> Favorites
+          </h2>
+          {favorites.length > 0 ? (
+            <ul className="space-y-3">
+              {favorites.map(fav => (
+                <li key={fav.station_id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer" onClick={() => navigate(`/driver/station/${fav.station_id}`)}>
+                  <div>
+                    <h3 className="font-semibold text-gray-800">{fav.station.name}</h3>
+                    <span className="text-xs text-gray-500 flex items-center gap-1"><Zap className="w-3 h-3 text-yellow-500" /> ₹{fav.station.price_per_kwh}/kWh</span>
+                  </div>
+                  <span className="text-sm font-medium text-emerald-600">View</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-gray-500">You haven't saved any stations yet.</p>
+          )}
+        </div>
       </div>
     </div>
   );
