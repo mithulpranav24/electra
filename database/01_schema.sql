@@ -271,12 +271,14 @@ CREATE TABLE WALLET_TRANSACTIONS (
     transaction_type VARCHAR(50) NOT NULL, -- 'Top-Up', 'Escrow Hold', 'Escrow Release', 'Session Payment', 'Penalty', 'Welcome Bonus'
     reference_id UUID, -- Can link to reservation_id, session_id, etc.
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-    locked_gate_at TIMESTAMP,
-    is_deprecating BOOLEAN NOT NULL DEFAULT FALSE,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_stations_area ON STATIONS(area_id);
+
+CREATE TABLE RECENT_STATIONS (
+    recent_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES USERS(user_id) ON DELETE CASCADE,
+    station_id UUID NOT NULL REFERENCES STATIONS(station_id) ON DELETE CASCADE,
+    viewed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE INDEX idx_stations_location ON STATIONS USING GIST(gps_coordinates);
 CREATE INDEX idx_stations_company ON STATIONS(company_id);
 

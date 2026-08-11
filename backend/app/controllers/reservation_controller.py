@@ -4,6 +4,7 @@ from sqlalchemy import func, or_
 from typing import List
 from decimal import Decimal
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -16,6 +17,36 @@ from app.schemas.reservation_schema import ReservationCreate, ReservationRespons
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
 
 ESCROW_AMOUNT = Decimal("200.00")
+SLA_TIMEOUT_MINUTES = 15
+
+def clean_expired_reservations(db: Session):
+    # Find confirmed reservations older than SLA_TIMEOUT_MINUTES
+    timeout_threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=SLA_TIMEOUT_MINUTES)
+    expired = db.query(Reservation).filter(
+        Reservation.status == "Confirmed",
+        Reservation.created_at < timeout_threshold
+    ).with_for_update().all()
+    
+    for res in expired:
+        res.status = "Cancelled"
+        res.cancellation_reason = "SLA Timeout (No Show)"
+        
+        # Free port
+        port = db.query(ChargingPort).filter(ChargingPort.port_id == res.port_id).first()
+        if port:
+            port.status = "Available"
+            
+        # Refund Escrow
+        refund_tx = WalletTransaction(
+            user_id=res.user_id,
+            amount=ESCROW_AMOUNT,
+            transaction_type="Escrow Refund (Timeout)",
+            reference_id=res.reservation_id
+        )
+        db.add(refund_tx)
+    
+    if expired:
+        db.commit()
 
 @router.post("", response_model=ReservationResponse)
 def create_reservation(
@@ -23,6 +54,8 @@ def create_reservation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    clean_expired_reservations(db)
+
     if current_user.role != "Driver":
         raise HTTPException(status_code=403, detail="Only drivers can reserve ports")
         
@@ -93,6 +126,8 @@ def get_active_reservations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    clean_expired_reservations(db)
+
     reservations = db.query(Reservation).filter(
         Reservation.user_id == current_user.user_id,
         Reservation.status.in_(["Confirmed", "Active"])
