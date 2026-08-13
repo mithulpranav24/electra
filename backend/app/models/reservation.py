@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, ForeignKey, func
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, ForeignKey, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database import Base
 
@@ -16,4 +16,6 @@ class Reservation(Base):
     cancellation_reason = Column(String(255), nullable=True)
     status_updated_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
     reserved_tariff = Column(Numeric(10, 2), nullable=False)
+    # DD-02: expires_at is the authoritative expiry time (accounts for extensions)
+    expires_at = Column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP + INTERVAL '15 minutes'"))
     created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())

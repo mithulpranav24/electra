@@ -31,7 +31,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             <ul className="list-disc list-inside space-y-2">
               <li><strong>Port ID:</strong> {portId.substring(0, 8)}...</li>
               <li><strong>Tariff:</strong> ₹{pricePerKwh}/kWh</li>
-              <li>An escrow of <strong>₹200</strong> will be temporarily held from your wallet.</li>
+              <li>An escrow of <strong>₹1,000</strong> will be temporarily held from your wallet.</li>
               <li>You have <strong>15 minutes</strong> to arrive and plug in, otherwise the reservation will expire and the escrow will be forfeited as a penalty.</li>
             </ul>
           </div>
