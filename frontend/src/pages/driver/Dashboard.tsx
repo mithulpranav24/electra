@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Clock, Navigation, BatteryCharging, Zap, Wallet } from 'lucide-react';
 import { authService } from '../../services/api';
 
 const Dashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
 
   useEffect(() => {
@@ -109,15 +111,15 @@ const Dashboard = () => {
         {/* Action Panel */}
         <div className="skeuo-panel p-6 flex flex-col gap-4">
           <h2 className="text-xl font-bold mb-2">Quick Actions</h2>
-          <button className="skeuo-btn skeuo-btn-primary w-full justify-start py-4">
+          <button onClick={() => navigate('/driver/search')} className="skeuo-btn skeuo-btn-primary w-full justify-start py-4">
             <Zap size={20} />
             <span>Find a Station</span>
           </button>
-          <button className="skeuo-btn w-full justify-start py-4">
+          <button onClick={() => navigate('/driver/search')} className="skeuo-btn w-full justify-start py-4">
             <Navigation size={20} />
             <span>View Map</span>
           </button>
-          <button className="skeuo-btn w-full justify-start py-4">
+          <button onClick={() => navigate('/driver/wallet')} className="skeuo-btn w-full justify-start py-4">
             <Wallet size={20} />
             <span>Add Funds</span>
           </button>

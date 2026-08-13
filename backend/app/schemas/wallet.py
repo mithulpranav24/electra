@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 from uuid import UUID
@@ -12,9 +12,7 @@ class PaymentMethodResponse(BaseModel):
     is_default: bool
     created_at: datetime
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class WalletTransactionResponse(BaseModel):
     transaction_id: UUID
@@ -23,9 +21,7 @@ class WalletTransactionResponse(BaseModel):
     reference_id: Optional[UUID]
     created_at: datetime
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class WalletTopUpRequest(BaseModel):
     amount: Decimal
