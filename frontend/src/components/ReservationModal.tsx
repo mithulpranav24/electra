@@ -7,7 +7,10 @@ interface ReservationModalProps {
   stationName: string;
   portId: string;
   pricePerKwh: number;
+  isLoading?: boolean;
 }
+
+export type { ReservationModalProps };
 
 export const ReservationModal: React.FC<ReservationModalProps> = ({
   isOpen,
@@ -15,7 +18,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
   onConfirm,
   stationName,
   portId,
-  pricePerKwh
+  pricePerKwh,
+  isLoading = false
 }) => {
   if (!isOpen) return null;
 
@@ -46,9 +50,15 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
           </button>
           <button
             onClick={onConfirm}
-            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all shadow-md hover:shadow-lg font-medium"
+            disabled={isLoading}
+            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all shadow-md hover:shadow-lg font-medium disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            Confirm & Reserve
+            {isLoading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Reserving...
+              </>
+            ) : 'Confirm & Reserve'}
           </button>
         </div>
       </div>

@@ -41,19 +41,16 @@ export const SearchStations: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      const response = await api.post('/search/stations', {
+      // Note: Axios interceptor already unwraps { success, data } -> data directly
+      const { data } = await api.post('/search/stations', {
         lat: userLat,
         lng: userLng,
         radius_km: radius,
         connector_type: connectorType || null,
       });
-      if (response.data.success) {
-        setStations(response.data.data);
-      } else {
-        setError(response.data.message || 'Failed to fetch stations');
-      }
+      setStations(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'An error occurred during search');
+      setError(err.message || 'An error occurred during search');
     } finally {
       setLoading(false);
     }
