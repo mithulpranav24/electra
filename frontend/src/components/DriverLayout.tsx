@@ -11,13 +11,14 @@ const DriverLayout = () => {
     navigate('/login');
   };
 
+  // Sidebar navigation links — all driver routes
   const navItems = [
     { to: '/driver/dashboard', icon: <LayoutDashboard size={20} />, label: 'Overview' },
-    { to: '/driver/search', icon: <Search size={20} />, label: 'Find Stations' },
-    { to: '/driver/vehicles', icon: <Car size={20} />, label: 'My Vehicles' },
-    { to: '/driver/sessions', icon: <Zap size={20} />, label: 'Charging Sessions' },
-    { to: '/driver/wallet', icon: <Wallet size={20} />, label: 'Wallet & Billing' },
-    { to: '/driver/profile', icon: <UserIcon size={20} />, label: 'Profile' },
+    { to: '/driver/search',    icon: <Search size={20} />,          label: 'Find Stations' },
+    { to: '/driver/vehicles',  icon: <Car size={20} />,              label: 'My Vehicles' },
+    { to: '/driver/sessions',  icon: <Zap size={20} />,              label: 'Charging Sessions' },
+    { to: '/driver/wallet',    icon: <Wallet size={20} />,           label: 'Wallet & Billing' },
+    { to: '/driver/profile',   icon: <UserIcon size={20} />,         label: 'Profile' },
   ];
 
   return (
