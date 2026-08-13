@@ -15,6 +15,7 @@ class ReservationResponse(BaseModel):
     port_id: UUID
     status: str
     reserved_tariff: Decimal
+    expires_at: datetime
     created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
