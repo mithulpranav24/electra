@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api, favoriteService } from '../../services/api';
 import { MapPin, Zap, Clock, ArrowLeft, Heart } from 'lucide-react';
 import { ReservationModal } from '../../components/ReservationModal';
+import type { ReservationModalProps } from '../../components/ReservationModal';
 
 export const StationDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -21,26 +22,27 @@ export const StationDetails: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [stationRes, vehiclesRes] = await Promise.all([
-          api.get(`/search/stations/${id}`),
-          api.get('/vehicles')
+        // Note: Axios interceptor already unwraps { success, data } -> data directly
+        const [stationData, vehiclesData] = await Promise.all([
+          api.get(`/search/stations/${id}`).then(r => r.data),
+          api.get('/vehicles').then(r => r.data)
         ]);
-        
-        if (stationRes.data.success) {
-          setStation(stationRes.data.data);
+
+        if (stationData) {
+          setStation(stationData);
         } else {
           setError('Failed to fetch station');
         }
-        
-        if (vehiclesRes.data.success) {
-          setVehicles(vehiclesRes.data.data);
+
+        if (Array.isArray(vehiclesData)) {
+          setVehicles(vehiclesData);
         }
 
         // Check favorite status
         const favRes = await favoriteService.getFavorites();
         if (favRes && Array.isArray(favRes)) {
-           const isFav = favRes.some((f: any) => f.station_id === id);
-           setIsFavorite(isFav);
+          const isFav = favRes.some((f: any) => f.station_id === id);
+          setIsFavorite(isFav);
         }
       } catch (err: any) {
         setError('Failed to load details');
@@ -64,20 +66,16 @@ export const StationDetails: React.FC = () => {
     
     setReserving(true);
     try {
-      const res = await api.post('/reservations', {
+      // Interceptor unwraps the response; a resolved promise means success
+      await api.post('/reservations', {
         port_id: selectedPort.port_id,
         vehicle_id: defaultVehicle.vehicle_id
       });
-      
-      if (res.data.success) {
-        alert("Reservation successful!");
-        setIsModalOpen(false);
-        navigate('/driver'); // Navigate back to dashboard to see active reservation
-      } else {
-        alert(res.data.message || "Failed to reserve");
-      }
+      alert("Reservation successful! ₹1,000 escrow has been held.");
+      setIsModalOpen(false);
+      navigate('/driver/dashboard');
     } catch (err: any) {
-      alert(err.response?.data?.message || "Error reserving port");
+      alert(err.message || "Error reserving port");
     } finally {
       setReserving(false);
     }
@@ -186,6 +184,7 @@ export const StationDetails: React.FC = () => {
           stationName={station.name}
           portId={selectedPort.port_id}
           pricePerKwh={station.price_per_kwh}
+          isLoading={reserving}
         />
       )}
     </div>
