@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
-import { CreditCard, Wallet as WalletIcon, ArrowUpRight, Clock, Plus } from 'lucide-react';
+import { CreditCard, Wallet as WalletIcon, Clock, Plus } from 'lucide-react';
 
 interface Transaction {
   transaction_id: string;
