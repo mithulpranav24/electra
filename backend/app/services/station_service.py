@@ -95,7 +95,7 @@ class StationService:
             
         StationService._check_operator_permission(db, user_id, str(station.company_id))
         
-        db.delete(station)
+        station.is_active = False
         db.commit()
         return {"detail": "Station deleted"}
 
@@ -150,6 +150,6 @@ class StationService:
         station = port.station
         StationService._check_operator_permission(db, user_id, str(station.company_id))
         
-        db.delete(port)
+        port.is_active = False
         db.commit()
         return {"detail": "Port deleted"}

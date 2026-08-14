@@ -47,3 +47,51 @@ class AuthService:
         if not verify_password(password, user.password_hash):
             return None
         return user
+
+    @staticmethod
+    def request_password_reset(db: Session, email: str):
+        from app.core.security import redis_client
+        import secrets
+        import hashlib
+        
+        user = db.query(User).filter(User.email == email).first()
+        if not user or not user.is_active:
+            return # Do not leak account existence
+            
+        token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+        
+        if redis_client:
+            # PRD: Expire within 15 minutes (900 seconds)
+            redis_client.setex(f"pw_reset:{token_hash}", 900, str(user.user_id))
+            
+            # In a real app we'd email the token here.
+            # print(f"Reset token for {email}: {token}")
+
+    @staticmethod
+    def confirm_password_reset(db: Session, token: str, new_password: str) -> bool:
+        from app.core.security import redis_client, get_password_hash
+        import hashlib
+        
+        if not redis_client:
+            return False
+            
+        token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+        user_id_bytes = redis_client.get(f"pw_reset:{token_hash}")
+        
+        if not user_id_bytes:
+            return False
+            
+        user_id = user_id_bytes.decode('utf-8')
+        user = db.query(User).filter(User.user_id == user_id).first()
+        
+        if not user or not user.is_active:
+            return False
+            
+        user.password_hash = get_password_hash(new_password)
+        db.commit()
+        
+        # Invalidate the token
+        redis_client.delete(f"pw_reset:{token_hash}")
+        
+        return True
