@@ -5,8 +5,9 @@ from uuid import UUID
 from decimal import Decimal
 
 class ReservationCreate(BaseModel):
-    port_id: str
     vehicle_id: str
+    station_id: Optional[str] = None
+    port_id: Optional[str] = None
 
 class ReservationResponse(BaseModel):
     reservation_id: UUID

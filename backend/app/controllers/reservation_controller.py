@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from typing import List
@@ -12,6 +12,7 @@ from app.models.user import User
 from app.models.station import Station, ChargingPort
 from app.models.reservation import Reservation
 from app.models.wallet import WalletTransaction
+from app.models.vehicle import Vehicle
 from app.schemas.reservation_schema import ReservationCreate, ReservationResponse
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
@@ -59,6 +60,7 @@ def clean_expired_reservations(db: Session):
 @router.post("", response_model=ReservationResponse)
 def create_reservation(
     request: ReservationCreate,
+    fastapi_req: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -84,55 +86,84 @@ def create_reservation(
         )
 
     try:
-        # DD-24 Lock order: STATIONS -> CHARGING_PORTS -> VEHICLES -> USERS -> RESERVATIONS
-        # Lock port (CHARGING_PORTS)
-        port = db.query(ChargingPort).with_for_update().filter(
-            ChargingPort.port_id == request.port_id
-        ).first()
+        from sqlalchemy import text
+        ip_address = fastapi_req.client.host if fastapi_req.client else "unknown"
+        
+        # If port_id is not provided, automatically recommend an optimal port
+        target_port_id = request.port_id
+        if not target_port_id:
+            if not request.station_id:
+                raise HTTPException(status_code=400, detail="Must provide either station_id or port_id")
+                
+            from app.models.vehicle import Vehicle
+            vehicle = db.query(Vehicle).filter(Vehicle.vehicle_id == request.vehicle_id).first()
+            if not vehicle:
+                raise HTTPException(status_code=404, detail="Vehicle not found")
+                
+            available_port = db.query(ChargingPort).filter(
+                ChargingPort.station_id == request.station_id,
+                ChargingPort.status == "Available",
+                ChargingPort.is_active == True,
+                ChargingPort.connector_type == vehicle.connector_type
+            ).first()
+            
+            if not available_port:
+                raise HTTPException(status_code=404, detail="No available ports matching your vehicle at this station")
+                
+            target_port_id = str(available_port.port_id)
 
-        if not port:
-            raise HTTPException(status_code=404, detail="Port not found")
-
-        if port.status != "Available":
-            raise HTTPException(status_code=409, detail="Port is not available")
-
-        # Deduct escrow hold
-        escrow_tx = WalletTransaction(
-            user_id=current_user.user_id,
-            amount=-ESCROW_AMOUNT,
-            transaction_type="Escrow Hold"
+        # Call the stored procedure to enforce concurrency and hierarchy
+        db.execute(
+            text("""
+                CALL sp_CreateReservation(
+                    :p_user_id,
+                    :p_port_id,
+                    :p_vehicle_id,
+                    :p_grace_period_minutes,
+                    :p_cooldown_minutes,
+                    :p_ip_address
+                )
+            """),
+            {
+                "p_user_id": current_user.user_id,
+                "p_port_id": target_port_id,
+                "p_vehicle_id": request.vehicle_id,
+                "p_grace_period_minutes": SLA_TIMEOUT_MINUTES,
+                "p_cooldown_minutes": 60, # Standard cooldown
+                "p_ip_address": str(ip_address)
+            }
         )
-        db.add(escrow_tx)
-
-        # Update port status
-        port.status = "Reserved"
-
-        # Create reservation with expires_at (DD-02)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        reservation = Reservation(
-            user_id=current_user.user_id,
-            vehicle_id=request.vehicle_id,
-            port_id=port.port_id,
-            status="Confirmed",
-            reserved_tariff=port.station.price_per_kwh,
-            expires_at=now + timedelta(minutes=SLA_TIMEOUT_MINUTES)
-        )
-        db.add(reservation)
-
+        
+        # After successful SP execution, fetch the newly created reservation
+        # The SP commits the transaction implicitly? No, SPs in Postgres participate in the current transaction.
+        # But wait, we shouldn't commit here if the SP fails.
         db.commit()
-        db.refresh(reservation)
+        
+        new_res = db.query(Reservation).filter(
+            Reservation.user_id == current_user.user_id,
+            Reservation.port_id == request.port_id,
+            Reservation.status == "Confirmed"
+        ).order_by(Reservation.created_at.desc()).first()
+        
+        if not new_res:
+            raise HTTPException(status_code=500, detail="Failed to retrieve created reservation")
+            
+        return new_res
 
-        # Update escrow tx reference_id
-        escrow_tx.reference_id = reservation.reservation_id
-        db.commit()
-
-        return reservation
-    except HTTPException as e:
-        db.rollback()
-        raise e
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        # Parse common postgres exceptions from SP
+        error_msg = str(e)
+        if "Insufficient wallet balance" in error_msg:
+            raise HTTPException(status_code=400, detail=f"Insufficient wallet balance. Minimum ₹{ESCROW_AMOUNT} required for escrow.")
+        elif "Port is not Available" in error_msg:
+            raise HTTPException(status_code=409, detail="Port is not available")
+        elif "User already has an active reservation" in error_msg:
+            raise HTTPException(status_code=400, detail="You already have an active reservation")
+        elif "Port not found" in error_msg:
+            raise HTTPException(status_code=404, detail="Port not found")
+        else:
+            raise HTTPException(status_code=400, detail=error_msg)
 
 @router.get("/active", response_model=List[ReservationResponse])
 def get_active_reservations(
@@ -177,9 +208,21 @@ def cancel_reservation(
         if reservation_read.status != "Confirmed":
             raise HTTPException(status_code=400, detail="Only confirmed reservations can be cancelled")
 
-        # Step 2: Acquire locks in correct order: CHARGING_PORTS -> RESERVATIONS
+        # Step 2: Acquire locks in correct order: STATIONS -> CHARGING_PORTS -> VEHICLES -> USERS -> RESERVATIONS
+        station = db.query(Station).join(ChargingPort).with_for_update().filter(
+            ChargingPort.port_id == reservation_read.port_id
+        ).first()
+
         port = db.query(ChargingPort).with_for_update().filter(
             ChargingPort.port_id == reservation_read.port_id
+        ).first()
+
+        vehicle = db.query(Vehicle).with_for_update().filter(
+            Vehicle.vehicle_id == reservation_read.vehicle_id
+        ).first()
+
+        user = db.query(User).with_for_update().filter(
+            User.user_id == current_user.user_id
         ).first()
 
         reservation = db.query(Reservation).with_for_update().filter(
@@ -192,8 +235,19 @@ def cancel_reservation(
             raise HTTPException(status_code=400, detail="Only confirmed reservations can be cancelled")
 
         # --- DD-24: Determine if escrow should be refunded or forfeited ---
+        
+        # Check if user is a Trusted Account (>100 successful sessions)
+        from app.models.session import ChargingSession
+        successful_sessions = db.query(ChargingSession).join(Reservation).filter(
+            Reservation.user_id == current_user.user_id,
+            ChargingSession.end_time.isnot(None),
+            ChargingSession.status == "Completed"
+        ).count()
+        is_trusted_account = successful_sessions > 100
+
+        cancel_window_minutes = 10 if is_trusted_account else FREE_CANCEL_HOLD_MINUTES
         hold_duration_minutes = (now - reservation.created_at).total_seconds() / 60
-        is_short_hold = hold_duration_minutes < FREE_CANCEL_HOLD_MINUTES
+        is_short_hold = hold_duration_minutes < cancel_window_minutes
 
         # Check if user has used their free cancellation in the last 24 hours
         twenty_four_hours_ago = now - timedelta(hours=24)
@@ -223,7 +277,7 @@ def cancel_reservation(
                 transaction_type="Escrow Release",
                 reference_id=reservation.reservation_id
             )
-            response_message = "Reservation cancelled and escrow refunded."
+            response_message = f"Reservation cancelled and escrow refunded. (Trusted: {is_trusted_account})"
         else:
             # Escrow is forfeited as cancellation penalty
             cancel_reason = "User cancelled (Penalty)"
@@ -233,7 +287,7 @@ def cancel_reservation(
                 transaction_type="Escrow Forfeited (Cancellation Penalty)",
                 reference_id=reservation.reservation_id
             )
-            response_message = "Reservation cancelled. Escrow of ₹1000 has been forfeited as a cancellation penalty per DD-24."
+            response_message = f"Reservation cancelled. Escrow of ₹1000 has been forfeited as a cancellation penalty per DD-24. (Trusted: {is_trusted_account})"
 
         db.add(wallet_tx)
 

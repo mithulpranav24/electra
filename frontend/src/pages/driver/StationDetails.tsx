@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api, favoriteService } from '../../services/api';
 import { MapPin, Zap, Clock, ArrowLeft, Heart } from 'lucide-react';
 import { ReservationModal } from '../../components/ReservationModal';
-import type { ReservationModalProps } from '../../components/ReservationModal';
 
 export const StationDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();

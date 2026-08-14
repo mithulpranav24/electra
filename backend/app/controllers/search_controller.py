@@ -25,7 +25,10 @@ def search_stations(
     # radius is in meters (radius_km * 1000)
     point = f'SRID=4326;POINT({request.lng} {request.lat})'
     
-    query = db.query(Station).filter(
+    # Calculate distance for sorting
+    distance = func.ST_Distance(Station.gps_coordinates, func.ST_GeogFromText(point)).label('distance')
+    
+    query = db.query(Station, distance).filter(
         Station.is_active == True,
         Station.is_deprecating == False,
         func.ST_DWithin(Station.gps_coordinates, func.ST_GeogFromText(point), request.radius_km * 1000)
@@ -36,15 +39,27 @@ def search_stations(
         if request.connector_type:
             query = query.filter(ChargingPort.connector_type == request.connector_type)
         if request.min_power_kw:
-            query = query.filter(Station.price_per_kwh >= 0) # Placeholder if power is added later, or filter differently
-            # For now, PRD doesn't enforce min_power_kw natively on Port, but we can filter if needed.
-            pass
+            # Map power to charger_type heuristics since power_kw is not stored natively
+            if request.min_power_kw > 22.0:
+                query = query.filter(ChargingPort.charger_type.in_(["Fast", "Ultra-Fast", "DCFC"]))
+            elif request.min_power_kw > 7.0:
+                query = query.filter(ChargingPort.charger_type.in_(["Level 2", "Fast", "Ultra-Fast", "DCFC"]))
+                
         query = query.filter(ChargingPort.is_active == True)
         
-    stations = query.all()
+    query = query.order_by(distance)
+    results = query.all()
     
-    # Use the existing service helper to map lat/lng
-    return [StationService._to_schema(db, s) for s in stations]
+    # results is a list of tuples (Station, distance)
+    # We need to add distance to the schema if needed, or just return sorted stations
+    stations = []
+    for s, dist in results:
+        s_schema = StationService._to_schema(db, s)
+        # Assuming frontend might want distance_km if added to StationResponse in the future
+        # s_schema['distance_km'] = dist / 1000.0
+        stations.append(s_schema)
+        
+    return stations
 
 @router.get("/stations/{station_id}", response_model=StationResponse)
 def get_station(
