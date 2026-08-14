@@ -32,7 +32,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const handleUnauthorized = () => {
-      logout();
+      setToken(null);
+      setUser(null);
     };
     window.addEventListener('auth-unauthorized', handleUnauthorized);
     return () => window.removeEventListener('auth-unauthorized', handleUnauthorized);
@@ -45,8 +46,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(userData);
     } catch (error) {
       console.error('Failed to fetch user:', error);
-      // If fetching user fails (e.g., token expired), logout
-      logout();
+      // If fetching user fails (e.g., token expired), clear local state
+      setToken(null);
+      setUser(null);
     } finally {
       setIsLoading(false);
     }
