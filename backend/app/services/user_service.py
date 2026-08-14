@@ -41,6 +41,12 @@ class UserService:
     def soft_delete_user(db: Session, user_id: UUID) -> User:
         user = UserService.get_user_by_id(db, user_id)
         
+        # Check if user is banned
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if user.banned_until and user.banned_until > now:
+            raise HTTPException(status_code=400, detail="Banned users cannot delete their accounts")
+
         # Check active reservations/sessions/invoices
         has_active_res = db.query(Reservation).filter(Reservation.user_id == user_id, Reservation.status.in_(['Confirmed', 'Active'])).first()
         if has_active_res:

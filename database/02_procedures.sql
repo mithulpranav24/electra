@@ -77,6 +77,10 @@ BEGIN
         
         -- Check USERS
         IF TG_TABLE_NAME = 'users' THEN
+            IF OLD.banned_until IS NOT NULL AND OLD.banned_until > CURRENT_TIMESTAMP THEN
+                RAISE EXCEPTION 'Cannot soft-delete banned user.';
+            END IF;
+            
             SELECT COUNT(*) INTO active_reservations_count FROM RESERVATIONS WHERE user_id = OLD.user_id AND status IN ('Confirmed', 'Active');
             IF active_reservations_count > 0 THEN RAISE EXCEPTION 'Cannot soft-delete user with active reservations.'; END IF;
 
