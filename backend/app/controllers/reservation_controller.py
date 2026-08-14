@@ -13,6 +13,7 @@ from app.models.station import Station, ChargingPort
 from app.models.reservation import Reservation
 from app.models.wallet import WalletTransaction
 from app.models.vehicle import Vehicle
+from app.models.audit import AuditLog
 from app.schemas.reservation_schema import ReservationCreate, ReservationResponse
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
@@ -43,7 +44,20 @@ def clean_expired_reservations(db: Session):
             ChargingPort.port_id == res.port_id
         ).first()
         if port:
-            port.status = "Available"
+            from app.models.transient import Waitlist
+            from app.models.vehicle import Vehicle
+            waitlist_entry = db.query(Waitlist).join(Vehicle).filter(
+                Waitlist.station_id == port.station_id,
+                Waitlist.offered_port_id.is_(None),
+                Vehicle.connector_type == port.connector_type
+            ).order_by(Waitlist.joined_at.asc()).first()
+
+            if waitlist_entry:
+                port.status = "Pending Waitlist"
+                waitlist_entry.offered_port_id = port.port_id
+                waitlist_entry.offered_at = func.now()
+            else:
+                port.status = "Available"
 
         # SLA timeout: escrow is forfeited (no refund) per DD-24
         penalty_tx = WalletTransaction(
@@ -104,7 +118,9 @@ def create_reservation(
                 ChargingPort.station_id == request.station_id,
                 ChargingPort.status == "Available",
                 ChargingPort.is_active == True,
-                ChargingPort.connector_type == vehicle.connector_type
+                ChargingPort.connector_type == vehicle.connector_type,
+                ChargingPort.has_health_warning == False,
+                ChargingPort.has_blocked_warning == False
             ).first()
             
             if not available_port:
@@ -148,6 +164,17 @@ def create_reservation(
         if not new_res:
             raise HTTPException(status_code=500, detail="Failed to retrieve created reservation")
             
+        audit = AuditLog(
+            user_id=current_user.user_id,
+            action="Reservation Created",
+            entity_type="RESERVATIONS",
+            entity_id=new_res.reservation_id,
+            details={"port_id": str(target_port_id), "vehicle_id": str(request.vehicle_id)},
+            ip_address=str(ip_address)
+        )
+        db.add(audit)
+        db.commit()
+
         return new_res
 
     except Exception as e:
@@ -181,6 +208,7 @@ def get_active_reservations(
 @router.post("/{reservation_id}/cancel")
 def cancel_reservation(
     reservation_id: str,
+    fastapi_req: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -299,6 +327,16 @@ def cancel_reservation(
         reservation.status = "Cancelled"
         reservation.cancellation_reason = cancel_reason
         reservation.status_updated_at = now
+
+        audit = AuditLog(
+            user_id=current_user.user_id,
+            action="Reservation Cancelled",
+            entity_type="RESERVATIONS",
+            entity_id=reservation.reservation_id,
+            details={"reason": cancel_reason},
+            ip_address=fastapi_req.client.host if fastapi_req.client else "unknown"
+        )
+        db.add(audit)
 
         db.commit()
         return {"success": True, "message": response_message}
