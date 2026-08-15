@@ -36,8 +36,12 @@ class WalletService:
             transaction_type="Top-Up"
         )
         db.add(transaction)
+        
+        # Update user wallet balance manually (no DB trigger)
+        user = db.query(User).filter(User.user_id == user_id).with_for_update().first()
+        if user:
+            user.wallet_balance = float(user.wallet_balance or 0) + float(amount)
+            
         db.commit()
         db.refresh(transaction)
-        
-        # Balance is automatically updated by the database trigger
         return transaction
