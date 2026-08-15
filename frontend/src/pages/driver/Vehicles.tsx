@@ -40,22 +40,28 @@ const Vehicles = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (vehicleId: string) => {
     if (!confirm('Are you sure you want to delete this vehicle?')) return;
     try {
-      await vehicleService.deleteVehicle(id);
+      await vehicleService.deleteVehicle(vehicleId);
       await fetchVehicles();
     } catch (err) {
       alert('Failed to delete vehicle');
     }
   };
 
-  const handleSetDefault = async (id: string) => {
+  const handleSetDefault = async (vehicleId: string) => {
+    // Optimistic UI update
+    setVehicles(prev => prev.map(v => ({
+      ...v,
+      is_default: (v.vehicle_id || v.id) === vehicleId
+    })));
     try {
-      await vehicleService.setDefaultVehicle(id);
+      await vehicleService.setDefaultVehicle(vehicleId);
       await fetchVehicles();
     } catch (err) {
       alert('Failed to set default vehicle');
+      await fetchVehicles(); // Revert on failure
     }
   };
 
@@ -112,11 +118,11 @@ const Vehicles = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {vehicles.map(vehicle => (
             <VehicleCard 
-              key={vehicle.id} 
+              key={vehicle.vehicle_id || vehicle.id} 
               vehicle={vehicle} 
               onEdit={() => handleEditClick(vehicle)}
-              onDelete={() => handleDelete(vehicle.id)}
-              onSetDefault={() => handleSetDefault(vehicle.id)}
+              onDelete={() => handleDelete(vehicle.vehicle_id || vehicle.id as string)}
+              onSetDefault={() => handleSetDefault(vehicle.vehicle_id || vehicle.id as string)}
             />
           ))}
         </div>

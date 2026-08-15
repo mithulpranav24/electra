@@ -10,6 +10,7 @@ import Profile from './pages/driver/Profile';
 import Wallet from './pages/driver/Wallet';
 import { SearchStations } from './pages/driver/SearchStations';
 import { StationDetails } from './pages/driver/StationDetails';
+import Sessions from './pages/driver/Sessions';
 
 import AdminDashboard from './pages/admin/Dashboard';
 import OperatorDashboard from './pages/operator/Dashboard';
@@ -79,6 +80,7 @@ function App() {
             <Route path="wallet" element={<Wallet />} />
             <Route path="search" element={<SearchStations />} />
             <Route path="station/:id" element={<StationDetails />} />
+            <Route path="sessions" element={<Sessions />} />
             <Route path="*" element={<Navigate to="/driver/dashboard" replace />} />
           </Route>
 
