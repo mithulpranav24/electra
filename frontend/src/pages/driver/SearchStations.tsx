@@ -27,7 +27,7 @@ export const SearchStations: React.FC = () => {
   const [stations, setStations] = useState<Station[]>([]);
   const [recentStations, setRecentStations] = useState<Station[]>([]);
   const [favorites, setFavorites] = useState<any[]>([]);
-  const [radius, setRadius] = useState<number | string>(10);
+  const [isFastCharging, setIsFastCharging] = useState(false);
   const [connectorType, setConnectorType] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -41,16 +41,13 @@ export const SearchStations: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      // Ensure radius is a valid number, otherwise default to 10
-      const parsedRadius = Number(radius);
-      const finalRadius = parsedRadius > 0 && parsedRadius <= 500 ? parsedRadius : 10;
-      
       // Note: Axios interceptor already unwraps { success, data } -> data directly
       const { data } = await api.post('/search/stations', {
         lat: userLat,
         lng: userLng,
-        radius_km: finalRadius,
+        radius_km: 10000, // Massive radius to show all stations
         connector_type: connectorType || null,
+        min_power_kw: isFastCharging ? 50 : null,
       });
       setStations(Array.isArray(data) ? data : []);
     } catch (err: any) {
@@ -77,15 +74,19 @@ export const SearchStations: React.FC = () => {
 
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap gap-4 items-end">
         <div className="flex-1 min-w-[200px]">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Search Radius (km)</label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <label className="block text-sm font-medium text-gray-700 mb-1">Charging Speed</label>
+          <div className="flex items-center h-[42px] px-4 bg-gray-50 border border-gray-300 rounded-lg">
             <input
-              type="number"
-              value={radius}
-              onChange={(e) => setRadius(e.target.value === '' ? '' : Number(e.target.value))}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+              type="checkbox"
+              id="fastCharging"
+              checked={isFastCharging}
+              onChange={(e) => setIsFastCharging(e.target.checked)}
+              className="w-4 h-4 text-emerald-600 bg-white border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
             />
+            <label htmlFor="fastCharging" className="ml-2 text-sm font-medium text-gray-700 cursor-pointer flex items-center gap-1">
+              <Zap className="w-4 h-4 text-emerald-500" />
+              Fast Charging Only (&gt;22kW)
+            </label>
           </div>
         </div>
 
