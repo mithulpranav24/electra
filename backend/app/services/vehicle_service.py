@@ -52,7 +52,7 @@ class VehicleService:
 
     @staticmethod
     def get_user_vehicles(db: Session, user_id: UUID):
-        return db.query(Vehicle).filter(Vehicle.user_id == user_id, Vehicle.is_active == True).all()
+        return db.query(Vehicle).filter(Vehicle.user_id == user_id, Vehicle.is_active == True).order_by(Vehicle.created_at.asc()).all()
 
     @staticmethod
     def update_vehicle(db: Session, vehicle_id: UUID, user_id: UUID, vehicle_in: VehicleUpdate) -> Vehicle:
