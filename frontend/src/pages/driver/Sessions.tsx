@@ -1,5 +1,4 @@
-import React from 'react';
-import { Zap, Clock, Calendar } from 'lucide-react';
+import { Zap, Clock } from 'lucide-react';
 
 export const Sessions = () => {
   return (

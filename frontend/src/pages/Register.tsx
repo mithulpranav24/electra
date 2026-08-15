@@ -1,121 +1,89 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, CreditCard, ArrowRight, ShieldCheck } from 'lucide-react';
-import { api } from '../services/api';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, UserRound } from 'lucide-react';
+import { authService } from '../services/api';
+import { getErrorMessage } from '../lib/errors';
+import { AuthLayout } from '../components/AuthLayout';
+import { Alert } from '../ui/Feedback';
+import { Field } from '../ui/Field';
+import { Button, IconButton } from '../ui/Button';
 
-const Register: React.FC = () => {
+export default function Register() {
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
 
+    if (password.length < 8) {
+      setError('Use at least 8 characters for your password.');
+      return;
+    }
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError('The passwords do not match.');
       return;
     }
 
+    setIsSubmitting(true);
     try {
-      // In a real flow, the mock payment would be processed here to tokenize the card.
-      await api.post('/auth/register', { email, password });
-      
-      // Redirect to login after successful registration
-      navigate('/login');
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        setError(detail.map((d: any) => d.msg).join(', '));
-      } else {
-        setError(detail || 'Registration failed');
-      }
+      await authService.register({ email: email.trim(), password, ...(fullName.trim() ? { full_name: fullName.trim() } : {}) });
+      navigate('/login', { replace: true, state: { registered: true } });
+    } catch (submitError) {
+      setError(getErrorMessage(submitError, 'Registration failed. Review your details and try again.'));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="skeuo-panel w-full max-w-xl p-8 flex flex-col gap-6">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-skeuo-text">Create Account</h1>
-          <p className="text-skeuo-text-muted mt-2">Join Electra to charge your EV anywhere</p>
-        </div>
+    <AuthLayout mode="register">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
+        {error && <Alert tone="error" title="Couldn’t create your account">{error}</Alert>}
 
-        {error && (
-          <div className="bg-red-100/50 text-red-600 p-3 rounded-xl text-sm border border-red-200 text-center">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-          <div className="grid grid-cols-1 gap-5">
-            <div className="skeuo-text-field-group">
-              <label className="skeuo-label">Email Address</label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-skeuo-text-muted" size={18} />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="skeuo-input pl-10 w-full"
-                  placeholder="driver@example.com"
-                />
-              </div>
+        <Field label="Full name" optional hint="You can also add this later from your account settings.">
+          {({ id, describedBy, invalid }) => (
+            <div className="relative">
+              <UserRound size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control pl-11" type="text" autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your name" autoFocus />
             </div>
+          )}
+        </Field>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div className="skeuo-text-field-group">
-                <label className="skeuo-label">Password</label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-skeuo-text-muted" size={18} />
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="skeuo-input pl-10 w-full"
-                    placeholder="••••••••"
-                  />
-                </div>
-              </div>
-              
-              <div className="skeuo-text-field-group">
-                <label className="skeuo-label">Confirm Password</label>
-                <div className="relative">
-                  <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 text-skeuo-text-muted" size={18} />
-                  <input
-                    type="password"
-                    required
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="skeuo-input pl-10 w-full"
-                    placeholder="••••••••"
-                  />
-                </div>
-              </div>
+        <Field label="Email address">
+          {({ id, describedBy, invalid }) => (
+            <div className="relative">
+              <Mail size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control pl-11" type="email" autoComplete="email" inputMode="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required />
             </div>
-          </div>
+          )}
+        </Field>
 
+        <Field label="Password" hint="Use 8 or more characters; common passwords are blocked.">
+          {({ id, describedBy, invalid }) => (
+            <div className="relative">
+              <LockKeyhole size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control px-11" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Create a password" required />
+              <IconButton label={showPasswords ? 'Hide passwords' : 'Show passwords'} className="absolute right-1 top-1/2 size-9 -translate-y-1/2 border-0 bg-transparent" onClick={() => setShowPasswords((value) => !value)}>{showPasswords ? <EyeOff size={18} /> : <Eye size={18} />}</IconButton>
+            </div>
+          )}
+        </Field>
 
+        <Field label="Confirm password">
+          {({ id, describedBy, invalid }) => (
+            <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Repeat your password" required />
+          )}
+        </Field>
 
-          <button type="submit" className="skeuo-btn skeuo-btn-primary mt-4">
-            <span>Complete Registration</span>
-            <ArrowRight size={18} />
-          </button>
-        </form>
-
-        <p className="text-center text-sm text-skeuo-text-muted mt-2">
-          Already have an account?{' '}
-          <Link to="/login" className="text-skeuo-accent font-semibold hover:underline">
-            Sign in
-          </Link>
-        </p>
-      </div>
-    </div>
+        <Button type="submit" variant="primary" size="lg" className="mt-1 w-full" isLoading={isSubmitting} icon={<ArrowRight size={18} />}>Create account</Button>
+        <p className="text-center text-sm text-[var(--steel)]">Already registered? <Link to="/login" className="font-bold text-[var(--teal-dark)] underline-offset-4 hover:underline">Sign in</Link></p>
+      </form>
+    </AuthLayout>
   );
-};
-
-export default Register;
+}
