@@ -51,11 +51,17 @@ const Vehicles = () => {
   };
 
   const handleSetDefault = async (vehicleId: string) => {
+    // Optimistic UI update
+    setVehicles(prev => prev.map(v => ({
+      ...v,
+      is_default: (v.vehicle_id || v.id) === vehicleId
+    })));
     try {
       await vehicleService.setDefaultVehicle(vehicleId);
       await fetchVehicles();
     } catch (err) {
       alert('Failed to set default vehicle');
+      await fetchVehicles(); // Revert on failure
     }
   };
 
