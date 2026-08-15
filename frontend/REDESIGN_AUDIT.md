@@ -139,4 +139,4 @@ Self-critique: an all-dark, neon-green EV dashboard would be a predictable categ
 - Eight focused regression tests cover formatting edge cases, reservation eligibility/submission, login payload behavior, and authentication errors.
 - npm reports zero known vulnerabilities after the transitive `nanoid` patch update.
 - Live browser rendering was measured at 320 px, 390 px, and 1440 px. In each case the document width matched the viewport width. Login API failures and registration validation failures were exercised and remained readable at phone width.
-- The existing backend reservation suite was invoked with the active local Python runtime but cannot collect because that environment is missing `geoalchemy2`. No backend code or contract was changed during this redesign.
+- The existing backend reservation suite ran with its missing GeoAlchemy dependency isolated to a temporary workspace-only folder: two tests passed and the database-seeded case skipped because the test database is unavailable. No backend code, global Python package, or API contract was changed.
