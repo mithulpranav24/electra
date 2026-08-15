@@ -22,7 +22,7 @@ class VehicleService:
         # Tier 2.5 and Tier 3 locks (Tier 2.5 must be locked before Tier 3)
         db.query(Vehicle).filter(Vehicle.user_id == user_id).with_for_update().all()
         db.query(User).filter(User.user_id == user_id).with_for_update().first()
-        db.query(Vehicle).filter(Vehicle.user_id == user_id, Vehicle.is_default == True).update({"is_default": False}, synchronize_session=False)
+        db.query(Vehicle).filter(Vehicle.user_id == user_id, Vehicle.is_default == True).update({"is_default": False}, synchronize_session='fetch')
 
     @staticmethod
     def create_vehicle(db: Session, vehicle_in: VehicleCreate, user_id: UUID) -> Vehicle:
