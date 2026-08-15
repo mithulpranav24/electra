@@ -1,205 +1,147 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
+import { CircleMarker, MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import L from 'leaflet';
-import { api, searchService, favoriteService } from '../../services/api';
-import { Search, MapPin, Zap, Filter, History, Heart } from 'lucide-react';
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+import 'leaflet/dist/leaflet.css';
+import { ArrowRight, Clock3, Filter, Heart, List, LocateFixed, Map, MapPin, PlugZap, Search, Zap } from 'lucide-react';
+import { favoriteService, searchService } from '../../services/api';
+import type { Favorite, Station } from '../../types';
+import { getErrorMessage } from '../../lib/errors';
+import { formatCurrency } from '../../lib/format';
+import { Badge } from '../../ui/Badge';
+import { Button } from '../../ui/Button';
+import { EmptyState, ErrorState, LoadingState } from '../../ui/Feedback';
+import { Field } from '../../ui/Field';
+import { PageHeader, SectionHeader } from '../../ui/Page';
 
-// Fix Leaflet default icon issue in React
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+const stationIcon = L.icon({ iconUrl: icon, shadowUrl: iconShadow, iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -35] });
+const userLat = 12.9716;
+const userLng = 77.5946;
 
-interface Station {
-  station_id: string;
-  name: string;
-  price_per_kwh: number;
-  lat: number;
-  lng: number;
-  ports: any[];
+function availablePorts(station: Station) {
+  return station.ports.filter((port) => port.is_active && port.status === 'Available').length;
 }
 
-export const SearchStations: React.FC = () => {
+function StationResult({ station, active, onOpen, onSelect }: { station: Station; active: boolean; onOpen: () => void; onSelect: () => void }) {
+  const available = availablePorts(station);
+  const hasWarnings = station.ports.some((port) => port.has_health_warning || port.has_blocked_warning);
+  return (
+    <article className={`interactive-row rounded-[var(--radius-md)] border bg-white p-4 ${active ? 'border-[var(--teal)] shadow-sm' : 'border-[var(--line)]'}`}>
+      <button type="button" className="w-full text-left" onClick={onSelect} aria-pressed={active}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0"><h3 className="font-display truncate text-lg font-bold">{station.name}</h3><p className="mt-1 flex items-center gap-1 text-xs text-[var(--steel)]"><MapPin size={13} /> {station.lat.toFixed(4)}, {station.lng.toFixed(4)}</p></div>
+          <Badge tone={available > 0 ? 'success' : 'neutral'}>{available} available</Badge>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-[var(--steel-dark)]">
+          <span className="font-data flex items-center gap-1.5 font-bold"><Zap size={15} className="text-[var(--teal)]" /> {formatCurrency(station.price_per_kwh)}/kWh</span>
+          <span className="flex items-center gap-1.5"><PlugZap size={15} /> {station.ports.length} total ports</span>
+          <span className="flex items-center gap-1.5"><Clock3 size={15} /> {station.opening_time_local && station.closing_time_local ? `${station.opening_time_local.slice(0, 5)}–${station.closing_time_local.slice(0, 5)}` : 'Open 24 hours'}</span>
+        </div>
+        {hasWarnings && <p className="mt-3 text-xs font-semibold text-[#7a580c]">Some ports have a reported issue; review port details before reserving.</p>}
+      </button>
+      <Button variant="ghost" size="sm" className="mt-3 w-full" icon={<ArrowRight size={15} />} onClick={onOpen}>View station</Button>
+    </article>
+  );
+}
+
+export function SearchStations() {
   const [stations, setStations] = useState<Station[]>([]);
   const [recentStations, setRecentStations] = useState<Station[]>([]);
-  const [favorites, setFavorites] = useState<any[]>([]);
-  const [isFastCharging, setIsFastCharging] = useState(false);
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [fastOnly, setFastOnly] = useState(false);
   const [connectorType, setConnectorType] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedStationId, setSelectedStationId] = useState('');
+  const [mobileView, setMobileView] = useState<'list' | 'map'>('list');
   const navigate = useNavigate();
 
-  // Mock user location (e.g., center of city)
-  const userLat = 12.9716;
-  const userLng = 77.5946;
-
-  const handleSearch = async () => {
-    setLoading(true);
+  const runSearch = useCallback(async (connector: string, fast: boolean) => {
     setError('');
+    setIsLoading(true);
     try {
-      // Note: Axios interceptor already unwraps { success, data } -> data directly
-      const { data } = await api.post('/search/stations', {
-        lat: userLat,
-        lng: userLng,
-        radius_km: 500, // Maximum allowed by backend schema
-        connector_type: connectorType || null,
-        min_power_kw: isFastCharging ? 50 : null,
-      });
-      setStations(Array.isArray(data) ? data : []);
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during search');
+      const results = await searchService.searchStations({ lat: userLat, lng: userLng, radius_km: 500, connector_type: connector || null, min_power_kw: fast ? 50 : null });
+      setStations(results);
+      setSelectedStationId((current) => results.some((station) => station.station_id === current) ? current : results[0]?.station_id ?? '');
+    } catch (searchError) {
+      setError(getErrorMessage(searchError, 'Stations could not be searched.'));
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  };
-
-  useEffect(() => {
-    handleSearch();
-    
-    // Fetch recents and favorites
-    searchService.getRecentStations().then(setRecentStations).catch(console.error);
-    favoriteService.getFavorites().then(setFavorites).catch(console.error);
   }, []);
 
+  const loadInitial = useCallback(async () => {
+    void runSearch('', false);
+    const [recentResult, favoriteResult] = await Promise.allSettled([searchService.getRecentStations(), favoriteService.getFavorites()]);
+    if (recentResult.status === 'fulfilled') setRecentStations(recentResult.value);
+    if (favoriteResult.status === 'fulfilled') setFavorites(favoriteResult.value);
+  }, [runSearch]);
+
+  useEffect(() => { void loadInitial(); }, [loadInitial]);
+
+  const selectedStation = useMemo(() => stations.find((station) => station.station_id === selectedStationId), [selectedStationId, stations]);
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-800">Find a Charger</h1>
-        <p className="text-gray-500 mt-1">Search for nearby charging stations.</p>
+    <div className="flex flex-col gap-7 enter-up">
+      <PageHeader eyebrow="Find charging" title="Choose the right stop" description="Compare compatible stations around Bengaluru before opening the map or committing to a port." />
+
+      <form className="surface grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(12rem,1fr)_minmax(12rem,1fr)_auto] lg:items-end" onSubmit={(event) => { event.preventDefault(); void runSearch(connectorType, fastOnly); }}>
+        <Field label="Connector type">
+          {({ id, describedBy }) => (
+            <div className="relative"><Filter size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" /><select id={id} aria-describedby={describedBy} className="field-control field-control-filter" value={connectorType} onChange={(event) => setConnectorType(event.target.value)}><option value="">Any connector</option><option value="CCS2">CCS 2</option><option value="CHAdeMO">CHAdeMO</option><option value="Type 2">Type 2</option></select></div>
+          )}
+        </Field>
+        <div>
+          <span className="field-label mb-1.5">Charging speed</span>
+          <label className="flex min-h-[2.875rem] cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] border border-[var(--line-strong)] bg-white px-3.5">
+            <input type="checkbox" checked={fastOnly} onChange={(event) => setFastOnly(event.target.checked)} className="size-4 accent-[var(--teal)]" />
+            <span className="flex items-center gap-2 text-sm font-bold"><Zap size={17} className="text-[var(--teal)]" /> Fast charging (50 kW+)</span>
+          </label>
+        </div>
+        <Button type="submit" variant="primary" size="lg" icon={<Search size={18} />} isLoading={isLoading}>Search stations</Button>
+      </form>
+
+      <div className="flex rounded-xl border border-[var(--line)] bg-white p-1 lg:hidden" aria-label="Search result view">
+        <button type="button" className={`flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg text-sm font-bold ${mobileView === 'list' ? 'bg-[var(--night)] text-white' : 'text-[var(--steel)]'}`} onClick={() => setMobileView('list')}><List size={17} /> List</button>
+        <button type="button" className={`flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg text-sm font-bold ${mobileView === 'map' ? 'bg-[var(--night)] text-white' : 'text-[var(--steel)]'}`} onClick={() => setMobileView('map')}><Map size={17} /> Map</button>
       </div>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap gap-4 items-end">
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Charging Speed</label>
-          <div className="flex items-center h-[42px] px-4 bg-gray-50 border border-gray-300 rounded-lg">
-            <input
-              type="checkbox"
-              id="fastCharging"
-              checked={isFastCharging}
-              onChange={(e) => setIsFastCharging(e.target.checked)}
-              className="w-4 h-4 text-emerald-600 bg-white border-gray-300 rounded focus:ring-emerald-500 cursor-pointer"
-            />
-            <label htmlFor="fastCharging" className="ml-2 text-sm font-medium text-gray-700 cursor-pointer flex items-center gap-1">
-              <Zap className="w-4 h-4 text-emerald-500" />
-              Fast Charging Only (&gt;22kW)
-            </label>
+      {error && stations.length === 0 ? <ErrorState title="Search unavailable" description={error} onRetry={() => void runSearch(connectorType, fastOnly)} /> : (
+        <section className="grid min-w-0 gap-5 lg:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.2fr)]">
+          <div className={`surface min-w-0 overflow-hidden ${mobileView === 'map' ? 'hidden lg:block' : ''}`}>
+            <div className="flex items-center justify-between border-b border-[var(--line)] px-4 py-3.5"><div><h2 className="font-display font-bold">Stations</h2><p className="text-xs text-[var(--steel)]">{isLoading ? 'Updating results…' : `${stations.length} match${stations.length === 1 ? '' : 'es'}`}</p></div>{selectedStation && <Badge tone="info">Selected</Badge>}</div>
+            <div className="app-scrollbar flex max-h-[680px] flex-col gap-3 overflow-y-auto p-3">
+              {isLoading && stations.length === 0 ? <LoadingState label="Searching stations" /> : stations.length === 0 ? <EmptyState title="No matching stations" description="Try another connector type or include standard-speed chargers." icon={<MapPin size={22} />} /> : stations.map((station) => <StationResult key={station.station_id} station={station} active={station.station_id === selectedStationId} onSelect={() => setSelectedStationId(station.station_id)} onOpen={() => navigate(`/driver/station/${station.station_id}`)} />)}
+            </div>
           </div>
-        </div>
 
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Connector Type</label>
-          <div className="relative">
-            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <select
-              value={connectorType}
-              onChange={(e) => setConnectorType(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all appearance-none"
-            >
-              <option value="">Any</option>
-              <option value="CCS2">CCS2</option>
-              <option value="CHAdeMO">CHAdeMO</option>
-              <option value="Type 2">Type 2</option>
-            </select>
+          <div className={`surface relative min-w-0 overflow-hidden ${mobileView === 'list' ? 'hidden lg:block' : ''}`} aria-label="Station map">
+            <div className="absolute left-3 top-3 z-[500] rounded-full border border-[var(--line)] bg-white/95 px-3 py-2 text-xs font-bold shadow-sm"><LocateFixed size={14} className="mr-1 inline text-[var(--teal)]" /> Bengaluru search center</div>
+            <MapContainer center={selectedStation ? [selectedStation.lat, selectedStation.lng] : [userLat, userLng]} zoom={12} className="h-[560px] w-full lg:h-[725px]" scrollWheelZoom>
+              <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <CircleMarker center={[userLat, userLng]} radius={8} pathOptions={{ color: '#ffffff', fillColor: '#087f6d', fillOpacity: 1, weight: 3 }}><Popup><strong>Search center</strong><br />Bengaluru</Popup></CircleMarker>
+              {stations.map((station) => (
+                <Marker key={station.station_id} position={[station.lat, station.lng]} icon={stationIcon} eventHandlers={{ click: () => setSelectedStationId(station.station_id) }}>
+                  <Popup><div className="min-w-44"><strong>{station.name}</strong><p className="my-1">{availablePorts(station)} ports available</p><p className="my-1">{formatCurrency(station.price_per_kwh)}/kWh</p><button type="button" className="mt-2 w-full rounded-md bg-[#087f6d] px-3 py-2 font-bold text-white" onClick={() => navigate(`/driver/station/${station.station_id}`)}>View station</button></div></Popup>
+                </Marker>
+              ))}
+            </MapContainer>
           </div>
-        </div>
-
-        <button
-          onClick={handleSearch}
-          disabled={loading}
-          className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all shadow-md font-medium disabled:opacity-70 h-[42px]"
-        >
-          {loading ? 'Searching...' : 'Search'}
-        </button>
-      </div>
-
-      {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg text-red-700">
-          <p>{error}</p>
-        </div>
+        </section>
       )}
 
-      <div className="h-[600px] bg-gray-100 rounded-xl overflow-hidden shadow-inner border border-gray-200">
-        <MapContainer center={[userLat, userLng]} zoom={12} className="w-full h-full z-0">
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          
-          <Marker position={[userLat, userLng]}>
-            <Popup>
-              <strong>You are here</strong>
-            </Popup>
-          </Marker>
-
-          {stations.map((station) => (
-            <Marker key={station.station_id} position={[station.lat, station.lng]}>
-              <Popup>
-                <div className="p-1">
-                  <h3 className="font-bold text-gray-800 mb-1">{station.name}</h3>
-                  <div className="text-sm text-gray-600 mb-2 flex flex-col gap-1">
-                    <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-yellow-500"/> ₹{station.price_per_kwh}/kWh</span>
-                    <span className="flex items-center gap-1"><MapPin className="w-3 h-3"/> {station.ports.length} Ports Available</span>
-                  </div>
-                  <button
-                    onClick={() => navigate(`/driver/station/${station.station_id}`)}
-                    className="w-full mt-2 bg-emerald-600 text-white py-1.5 rounded-lg text-sm hover:bg-emerald-700 transition-colors"
-                  >
-                    View Details
-                  </button>
-                </div>
-              </Popup>
-            </Marker>
-          ))}
-        </MapContainer>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <History className="w-5 h-5 text-gray-500" /> Recent Stations
-          </h2>
-          {recentStations.length > 0 ? (
-            <ul className="space-y-3">
-              {recentStations.map(station => (
-                <li key={station.station_id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer" onClick={() => navigate(`/driver/station/${station.station_id}`)}>
-                  <div>
-                    <h3 className="font-semibold text-gray-800">{station.name}</h3>
-                    <span className="text-xs text-gray-500 flex items-center gap-1"><Zap className="w-3 h-3 text-yellow-500" /> ₹{station.price_per_kwh}/kWh</span>
-                  </div>
-                  <span className="text-sm font-medium text-emerald-600">View</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-gray-500">No recently viewed stations.</p>
-          )}
+      <section className="grid gap-5 lg:grid-cols-2">
+        <div className="surface p-5 sm:p-6">
+          <SectionHeader title="Recently viewed" description="Your five most recent station detail pages." />
+          {recentStations.length === 0 ? <EmptyState compact title="No recent stations" description="Stations you inspect will stay here for quick return." icon={<Clock3 size={21} />} /> : <div className="mt-4 flex flex-col gap-2">{recentStations.map((station) => <button key={station.station_id} type="button" className="interactive-row flex min-h-14 items-center gap-3 rounded-lg border border-[var(--line)] p-3 text-left" onClick={() => navigate(`/driver/station/${station.station_id}`)}><span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--paper-muted)] text-[var(--teal)]"><MapPin size={17} /></span><span className="min-w-0 flex-1"><span className="block truncate font-bold">{station.name}</span><span className="font-data block text-xs text-[var(--steel)]">{formatCurrency(station.price_per_kwh)}/kWh</span></span><ArrowRight size={16} className="text-[var(--steel)]" /></button>)}</div>}
         </div>
-
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <Heart className="w-5 h-5 text-red-500" /> Favorites
-          </h2>
-          {favorites.length > 0 ? (
-            <ul className="space-y-3">
-              {favorites.map(fav => (
-                <li key={fav.station_id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer" onClick={() => navigate(`/driver/station/${fav.station_id}`)}>
-                  <div>
-                    <h3 className="font-semibold text-gray-800">{fav.station.name}</h3>
-                    <span className="text-xs text-gray-500 flex items-center gap-1"><Zap className="w-3 h-3 text-yellow-500" /> ₹{fav.station.price_per_kwh}/kWh</span>
-                  </div>
-                  <span className="text-sm font-medium text-emerald-600">View</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-gray-500">You haven't saved any stations yet.</p>
-          )}
+        <div className="surface p-5 sm:p-6">
+          <SectionHeader title="Saved stations" description="Favorites you marked for quick access." />
+          {favorites.length === 0 ? <EmptyState compact title="No saved stations" description="Use the heart on a station page to keep it here." icon={<Heart size={21} />} /> : <div className="mt-4 flex flex-col gap-2">{favorites.map((favorite) => <button key={favorite.favorite_id} type="button" className="interactive-row flex min-h-14 items-center gap-3 rounded-lg border border-[var(--line)] p-3 text-left" onClick={() => navigate(`/driver/station/${favorite.station_id}`)}><span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--red-soft)] text-[var(--red)]"><Heart size={17} fill="currentColor" /></span><span className="min-w-0 flex-1"><span className="block truncate font-bold">{favorite.station.name}</span><span className="font-data block text-xs text-[var(--steel)]">{formatCurrency(favorite.station.price_per_kwh)}/kWh</span></span><ArrowRight size={16} className="text-[var(--steel)]" /></button>)}</div>}
         </div>
-      </div>
+      </section>
     </div>
   );
-};
+}

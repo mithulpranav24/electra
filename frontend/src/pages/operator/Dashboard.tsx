@@ -1,274 +1,165 @@
-import React, { useState, useEffect } from 'react';
-import { operatorService, authService } from '../../services/api';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Building2, CircleOff, MapPin, Pencil, PlugZap, Plus, RadioTower, Trash2, Wrench } from 'lucide-react';
+import { authService, operatorService } from '../../services/api';
+import type { ChargingPort, CompanyMembership, Station } from '../../types';
+import { getErrorMessage } from '../../lib/errors';
+import { formatCurrency, shortId } from '../../lib/format';
+import { PortFormDialog } from '../../components/operator/PortFormDialog';
+import { StationFormDialog } from '../../components/operator/StationFormDialog';
+import { Badge } from '../../ui/Badge';
+import { statusTone } from '../../lib/status';
+import { Button, IconButton } from '../../ui/Button';
+import { ConfirmDialog } from '../../ui/ConfirmDialog';
+import { EmptyState, ErrorState, LoadingState } from '../../ui/Feedback';
+import { PageHeader, SectionHeader } from '../../ui/Page';
+import { useToast } from '../../ui/ToastContext';
 
-// Fix for default leaflet icons in React
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-let DefaultIcon = L.icon({
-  iconUrl: icon,
-  shadowUrl: iconShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41]
-});
-L.Marker.prototype.options.icon = DefaultIcon;
-
-function LocationMarker({ position, setPosition }: { position: [number, number], setPosition: (p: [number, number]) => void }) {
-  useMapEvents({
-    click(e) {
-      setPosition([e.latlng.lat, e.latlng.lng]);
-    },
-  });
-
-  return position === null ? null : (
-    <Marker position={position}></Marker>
-  );
-}
+type DeleteTarget = { kind: 'station'; station: Station } | { kind: 'port'; port: ChargingPort; stationName: string };
 
 export default function OperatorDashboard() {
-  const [stations, setStations] = useState<any[]>([]);
-  const [companyId, setCompanyId] = useState<string>(''); 
-  const { logout } = useAuth();
-  
-  const [newStation, setNewStation] = useState({
-    name: '',
-    price_per_kwh: '0.50',
-    minimum_session_fee: '1.00',
-    timezone: 'UTC',
-    lat: 37.7749,
-    lng: -122.4194
-  });
+  const [memberships, setMemberships] = useState<CompanyMembership[]>([]);
+  const [companyId, setCompanyId] = useState('');
+  const [stations, setStations] = useState<Station[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [stationDialog, setStationDialog] = useState<{ open: boolean; station: Station | null }>({ open: false, station: null });
+  const [portDialog, setPortDialog] = useState<{ open: boolean; stationId: string; port: ChargingPort | null }>({ open: false, stationId: '', port: null });
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const { pushToast } = useToast();
 
-  const [newPort, setNewPort] = useState({
-    station_id: '',
-    qr_code: '',
-    connector_type: 'CCS2',
-    charger_type: 'DC Fast'
-  });
-
-  const navigate = useNavigate();
-
-  const loadStations = async (cId: string) => {
+  const loadStations = useCallback(async (targetCompanyId: string, showLoader = true) => {
+    if (showLoader) setIsLoading(true);
+    setError('');
     try {
-      if (cId) {
-        const data = await operatorService.getStations(cId);
-        setStations(data);
-      }
-    } catch (error) {
-      console.error('Failed to load stations', error);
+      setStations(await operatorService.getStations(targetCompanyId));
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, 'Stations could not be loaded for this company.'));
+    } finally {
+      setIsLoading(false);
     }
-  };
-
-  useEffect(() => {
-    const fetchCompanies = async () => {
-      try {
-        const comps = await authService.getMyCompanies();
-        if (comps && comps.length > 0) {
-          const firstCompanyId = comps[0].company_id;
-          setCompanyId(firstCompanyId);
-          loadStations(firstCompanyId);
-        }
-      } catch (err) {
-        console.error("Failed to fetch companies", err);
-      }
-    };
-    fetchCompanies();
   }, []);
 
-  const handleCreateStation = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const loadWorkspace = useCallback(async () => {
+    setIsLoading(true);
+    setError('');
     try {
-      const payload = {
-        ...newStation,
-        price_per_kwh: parseFloat(newStation.price_per_kwh),
-        minimum_session_fee: parseFloat(newStation.minimum_session_fee)
-      };
-      await operatorService.createStation(companyId, payload);
-      alert('Station created!');
-      loadStations(companyId);
-    } catch (error) {
-      console.error('Failed to create station', error);
-      alert('Error creating station. Make sure you belong to the company ID used.');
+      const assignedMemberships = await authService.getMyCompanies();
+      setMemberships(assignedMemberships);
+      const firstCompanyId = assignedMemberships[0]?.company_id ?? '';
+      setCompanyId(firstCompanyId);
+      if (firstCompanyId) await loadStations(firstCompanyId, false);
+      else setStations([]);
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, 'Your operator assignments could not be loaded.'));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [loadStations]);
+
+  useEffect(() => { void loadWorkspace(); }, [loadWorkspace]);
+
+  const metrics = useMemo(() => {
+    const ports = stations.flatMap((station) => station.ports ?? []);
+    return {
+      activeStations: stations.filter((station) => station.is_active).length,
+      available: ports.filter((port) => port.is_active && port.status === 'Available' && !port.is_pending_maintenance).length,
+      charging: ports.filter((port) => port.status === 'Charging').length,
+      attention: ports.filter((port) => port.has_health_warning || port.has_blocked_warning || port.is_pending_maintenance || ['Maintenance', 'Offline'].includes(port.status)).length,
+    };
+  }, [stations]);
+
+  const refresh = () => companyId ? loadStations(companyId, false) : loadWorkspace();
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      if (deleteTarget.kind === 'station') await operatorService.deleteStation(deleteTarget.station.station_id);
+      else await operatorService.deletePort(deleteTarget.port.port_id);
+      const kind = deleteTarget.kind;
+      setDeleteTarget(null);
+      await refresh();
+      pushToast({ title: kind === 'station' ? 'Station deactivated' : 'Port removed', message: 'Historical records remain preserved by the backend.', tone: 'success' });
+    } catch (deleteError) {
+      pushToast({ title: 'Couldn’t complete the removal', message: getErrorMessage(deleteError, 'Active reservations, sessions, or queue activity may need to drain first.'), tone: 'error' });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  const handleCreatePort = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPort.station_id) return alert('Select a station first');
-    try {
-      await operatorService.createPort(newPort.station_id, newPort);
-      alert('Port created!');
-      loadStations(companyId);
-      setNewPort({ ...newPort, qr_code: '' });
-    } catch (error) {
-      console.error('Failed to create port', error);
-      alert('Error creating port');
-    }
-  };
-  
-  const handleDeleteStation = async (id: string) => {
-    if(!window.confirm("Delete this station?")) return;
-    try {
-      await operatorService.deleteStation(id);
-      loadStations(companyId);
-    } catch(e) { alert('Error deleting station'); }
-  };
-  
-  const handleDeletePort = async (id: string) => {
-    if(!window.confirm("Delete this port?")) return;
-    try {
-      await operatorService.deletePort(id);
-      loadStations(companyId);
-    } catch(e) { alert('Error deleting port'); }
-  };
+  const deleteName = deleteTarget?.kind === 'station' ? deleteTarget.station.name : deleteTarget?.kind === 'port' ? `port ${deleteTarget.port.qr_code}` : 'this item';
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8 animate-fade-in">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-500 to-teal-600">Operator Dashboard</h1>
-          <p className="text-skeuo-text-muted mt-2">Manage Stations and Charging Ports</p>
-        </div>
-        <div className="flex gap-4">
-          <button className="skeuo-btn" onClick={() => navigate('/driver/dashboard')}>
-            Back to Main
-          </button>
-          <button className="skeuo-btn text-red-500 font-semibold" onClick={logout}>
-            Logout
-          </button>
-        </div>
-      </div>
+    <div className="flex flex-col gap-7 enter-up">
+      <PageHeader eyebrow="Operator workspace" title="Station operations" description="Keep stations bookable, port states accurate, and warnings visible to drivers." actions={<><Button icon={<PlugZap size={18} />} onClick={() => setPortDialog({ open: true, stationId: '', port: null })} disabled={!companyId || stations.length === 0}>Add port</Button><Button variant="primary" icon={<Plus size={18} />} onClick={() => setStationDialog({ open: true, station: null })} disabled={!companyId}>Create station</Button></>} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="skeuo-panel p-6 space-y-6">
-          <h2 className="text-xl font-semibold">Create Station</h2>
-          <form onSubmit={handleCreateStation} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="skeuo-text-field-group">
-                <label className="skeuo-label">Station Name</label>
-                <input required type="text" className="skeuo-input" value={newStation.name} onChange={e => setNewStation({...newStation, name: e.target.value})} />
-              </div>
-              <div className="skeuo-text-field-group">
-                <label className="skeuo-label">Timezone</label>
-                <input required type="text" className="skeuo-input" value={newStation.timezone} onChange={e => setNewStation({...newStation, timezone: e.target.value})} />
-              </div>
-              <div className="skeuo-text-field-group">
-                <label className="skeuo-label">Price/kWh ($)</label>
-                <input required type="number" step="0.01" className="skeuo-input" value={newStation.price_per_kwh} onChange={e => setNewStation({...newStation, price_per_kwh: e.target.value})} />
-              </div>
-              <div className="skeuo-text-field-group">
-                <label className="skeuo-label">Min Fee ($)</label>
-                <input required type="number" step="0.01" className="skeuo-input" value={newStation.minimum_session_fee} onChange={e => setNewStation({...newStation, minimum_session_fee: e.target.value})} />
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <label className="skeuo-label block mb-2">Location (Drop Pin or Type)</label>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="skeuo-text-field-group">
-                  <input type="number" step="any" className="skeuo-input text-sm" placeholder="Lat" value={newStation.lat} onChange={e => setNewStation({...newStation, lat: parseFloat(e.target.value)})} />
-                </div>
-                <div className="skeuo-text-field-group">
-                  <input type="number" step="any" className="skeuo-input text-sm" placeholder="Lng" value={newStation.lng} onChange={e => setNewStation({...newStation, lng: parseFloat(e.target.value)})} />
-                </div>
-              </div>
-              
-              <div className="h-48 w-full rounded-xl overflow-hidden shadow-skeuo-pressed border border-white/20 dark:border-white/5 relative z-0">
-                <MapContainer center={[newStation.lat, newStation.lng]} zoom={13} style={{ height: '100%', width: '100%' }}>
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  <LocationMarker position={[newStation.lat, newStation.lng]} setPosition={(p) => setNewStation({...newStation, lat: p[0], lng: p[1]})} />
-                </MapContainer>
-              </div>
-            </div>
-            
-            <button type="submit" className="skeuo-btn skeuo-btn-primary w-full">Create Station</button>
-          </form>
+      {memberships.length > 1 && (
+        <div className="surface flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="text-sm font-bold">Company assignment</p><p className="text-xs text-[var(--steel)]">Switch between companies assigned to your operator account.</p></div>
+          <select className="field-control sm:max-w-sm" value={companyId} onChange={(event) => { const id = event.target.value; setCompanyId(id); void loadStations(id); }} aria-label="Select company assignment">{memberships.map((membership) => <option key={membership.membership_id} value={membership.company_id}>Company {shortId(membership.company_id, 12)}</option>)}</select>
         </div>
+      )}
 
-        <div className="skeuo-panel p-6 space-y-6 flex flex-col">
-          <h2 className="text-xl font-semibold">Add Charging Port</h2>
-          <form onSubmit={handleCreatePort} className="space-y-4 flex-1">
-            <div className="skeuo-text-field-group">
-              <label className="skeuo-label">Station</label>
-              <select required className="skeuo-input" value={newPort.station_id} onChange={e => setNewPort({...newPort, station_id: e.target.value})}>
-                <option value="">Select Station...</option>
-                {stations.map(s => <option key={s.station_id} value={s.station_id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="skeuo-text-field-group">
-                <label className="skeuo-label">QR Code</label>
-                <input required type="text" className="skeuo-input" value={newPort.qr_code} onChange={e => setNewPort({...newPort, qr_code: e.target.value})} />
-              </div>
-              <div className="skeuo-text-field-group">
-                <label className="skeuo-label">Connector Type</label>
-                <select className="skeuo-input" value={newPort.connector_type} onChange={e => setNewPort({...newPort, connector_type: e.target.value})}>
-                  <option>CCS2</option>
-                  <option>CCS1</option>
-                  <option>CHAdeMO</option>
-                  <option>Type 2</option>
-                </select>
-              </div>
-              <div className="skeuo-text-field-group col-span-2">
-                <label className="skeuo-label">Charger Type</label>
-                <select className="skeuo-input" value={newPort.charger_type} onChange={e => setNewPort({...newPort, charger_type: e.target.value})}>
-                  <option>DC Fast</option>
-                  <option>AC Level 2</option>
-                  <option>Ultra Fast DC</option>
-                </select>
-              </div>
-            </div>
-            <button type="submit" className="skeuo-btn skeuo-btn-primary w-full mt-4">Add Port</button>
-          </form>
-        </div>
-      </div>
+      {isLoading ? <div className="surface"><LoadingState label="Loading station operations" /></div> : error && stations.length === 0 ? <ErrorState description={error} onRetry={() => void loadWorkspace()} /> : !companyId ? (
+        <div className="surface"><EmptyState title="No company assignment" description="An administrator must assign your operator account to a company before you can manage stations." icon={<Building2 size={24} />} /></div>
+      ) : (
+        <>
+          {error && <div className="rounded-xl border border-[var(--red)]/25 bg-[var(--red-soft)] p-4 text-sm font-semibold text-[var(--red-dark)]" role="alert">{error}</div>}
 
-      <div className="skeuo-panel p-6 space-y-4">
-        <h2 className="text-xl font-semibold">Stations Overview</h2>
-        {stations.length === 0 ? (
-          <p className="text-skeuo-text-muted">No stations assigned to your company.</p>
-        ) : (
-          <div className="space-y-4">
-            {stations.map(station => (
-              <div key={station.station_id} className="p-4 rounded-xl border border-white/20 dark:border-white/5 bg-white/10 shadow-skeuo-sm">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="font-bold text-lg">{station.name}</h3>
-                    <p className="text-sm text-skeuo-text-muted">Price: ${station.price_per_kwh}/kWh | Coords: {station.lat.toFixed(4)}, {station.lng.toFixed(4)}</p>
-                  </div>
-                  <button onClick={() => handleDeleteStation(station.station_id)} className="text-red-500 hover:text-red-600 text-sm font-semibold">Delete</button>
-                </div>
-                
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold text-skeuo-text-muted uppercase tracking-wider">Charging Ports</h4>
-                  {station.ports && station.ports.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {station.ports.map((port: any) => (
-                        <div key={port.port_id} className="bg-skeuo-base dark:bg-dark-skeuo-base p-3 rounded-lg shadow-skeuo-pressed-sm flex flex-col gap-1">
-                          <div className="flex justify-between">
-                            <span className="font-mono text-xs">{port.qr_code}</span>
-                            <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${port.status === 'Available' ? 'bg-green-500/20 text-green-600' : 'bg-orange-500/20 text-orange-600'}`}>{port.status}</span>
-                          </div>
-                          <div className="text-sm">{port.connector_type} • {port.charger_type}</div>
-                          <div className="flex justify-end gap-2 mt-2">
-                            <button onClick={() => handleDeletePort(port.port_id)} className="text-xs text-red-500 font-medium">Remove</button>
-                          </div>
-                        </div>
-                      ))}
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Operations overview">
+            {[
+              { label: 'Active stations', value: metrics.activeStations, icon: MapPin, tone: 'bg-[var(--blue-soft)] text-[#285270]' },
+              { label: 'Ports available', value: metrics.available, icon: PlugZap, tone: 'bg-[var(--teal-soft)] text-[var(--teal-dark)]' },
+              { label: 'Charging now', value: metrics.charging, icon: RadioTower, tone: 'bg-[var(--amber-soft)] text-[#6f500c]' },
+              { label: 'Needs attention', value: metrics.attention, icon: Wrench, tone: metrics.attention ? 'bg-[var(--red-soft)] text-[var(--red)]' : 'bg-[var(--paper-muted)] text-[var(--steel)]' },
+            ].map(({ label, value, icon: Icon, tone }) => <div key={label} className="surface flex items-center gap-4 p-4"><span className={`flex size-11 items-center justify-center rounded-full ${tone}`}><Icon size={20} /></span><div><p className="font-data text-2xl font-bold">{value}</p><p className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">{label}</p></div></div>)}
+          </section>
+
+          <section className="surface overflow-hidden">
+            <div className="flex flex-col gap-3 border-b border-[var(--line)] p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6"><SectionHeader title="Stations" description={`Company ${shortId(companyId, 12)} · ${stations.length} station${stations.length === 1 ? '' : 's'}`} /><Button size="sm" variant="ghost" onClick={() => void refresh()}>Refresh</Button></div>
+            {stations.length === 0 ? (
+              <EmptyState title="Create the first station" description="Add its location, pricing, and operating hours, then attach charging ports." icon={<MapPin size={23} />} action={<Button variant="primary" icon={<Plus size={17} />} onClick={() => setStationDialog({ open: true, station: null })}>Create station</Button>} />
+            ) : (
+              <div className="divide-y divide-[var(--line)]">
+                {stations.map((station) => (
+                  <article key={station.station_id} className={!station.is_active ? 'bg-[var(--paper-muted)] opacity-75' : ''}>
+                    <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+                      <div className="min-w-0">
+                        <div className="mb-2 flex flex-wrap items-center gap-2"><h3 className="font-display text-xl font-bold">{station.name}</h3><Badge tone={station.is_active ? 'success' : 'danger'}>{station.is_active ? 'Active' : 'Inactive'}</Badge>{station.is_deprecating && <Badge tone="warning">Deprecating</Badge>}{station.locked_gate && <Badge tone="info">Locked gate</Badge>}</div>
+                        <p className="font-data text-xs text-[var(--steel)]">{station.lat.toFixed(4)}, {station.lng.toFixed(4)} · {station.timezone}</p>
+                        <p className="mt-2 text-sm text-[var(--steel-dark)]">{formatCurrency(station.price_per_kwh)}/kWh · Minimum {formatCurrency(station.minimum_session_fee)} · {station.opening_time_local && station.closing_time_local ? `${station.opening_time_local.slice(0, 5)}–${station.closing_time_local.slice(0, 5)}` : '24 hours'}</p>
+                      </div>
+                      <div className="flex gap-2"><Button size="sm" icon={<Plus size={16} />} onClick={() => setPortDialog({ open: true, stationId: station.station_id, port: null })} disabled={!station.is_active}>Add port</Button><IconButton label={`Edit ${station.name}`} onClick={() => setStationDialog({ open: true, station })}><Pencil size={17} /></IconButton><IconButton label={`Deactivate ${station.name}`} variant="danger" onClick={() => setDeleteTarget({ kind: 'station', station })} disabled={!station.is_active}><Trash2 size={17} /></IconButton></div>
                     </div>
-                  ) : (
-                    <p className="text-sm text-skeuo-text-muted">No ports found for this station.</p>
-                  )}
-                </div>
+
+                    <div className="border-t border-[var(--line)] bg-[#fafbfa] p-4 sm:p-5">
+                      {station.ports?.length ? (
+                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                          {station.ports.map((port) => {
+                            const warning = port.has_health_warning || port.has_blocked_warning || port.is_pending_maintenance;
+                            return (
+                              <div key={port.port_id} className="rounded-[var(--radius-md)] border border-[var(--line)] bg-white p-4">
+                                <div className="flex items-start justify-between gap-3"><div><p className="font-display font-bold">{port.connector_type} · {port.charger_type}</p><p className="font-data mt-1 truncate text-xs text-[var(--steel)]" title={port.qr_code}>QR {port.qr_code}</p></div><Badge tone={statusTone(port.status)}>{port.status}</Badge></div>
+                                {warning && <div className="mt-3 flex flex-wrap gap-1.5">{port.has_health_warning && <Badge tone="warning">Health warning</Badge>}{port.has_blocked_warning && <Badge tone="warning">Blocked bay</Badge>}{port.is_pending_maintenance && <Badge tone="danger">Pending maintenance</Badge>}</div>}
+                                <div className="mt-4 flex justify-end gap-2"><IconButton label={`Edit port ${port.qr_code}`} onClick={() => setPortDialog({ open: true, stationId: station.station_id, port })}><Pencil size={16} /></IconButton><IconButton label={`Remove port ${port.qr_code}`} variant="danger" onClick={() => setDeleteTarget({ kind: 'port', port, stationName: station.name })} disabled={!port.is_active}><Trash2 size={16} /></IconButton></div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : <EmptyState compact title="No charging ports" description="Add a physical port to make this station useful to drivers." icon={<CircleOff size={21} />} action={<Button size="sm" icon={<Plus size={16} />} onClick={() => setPortDialog({ open: true, stationId: station.station_id, port: null })}>Add port</Button>} />}
+                    </div>
+                  </article>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            )}
+          </section>
+        </>
+      )}
+
+      <StationFormDialog open={stationDialog.open} companyId={companyId} station={stationDialog.station} onClose={() => setStationDialog({ open: false, station: null })} onSuccess={(_station, mode) => { setStationDialog({ open: false, station: null }); void refresh(); pushToast({ title: mode === 'created' ? 'Station created' : 'Station updated', tone: 'success' }); }} />
+      <PortFormDialog open={portDialog.open} stations={stations} stationId={portDialog.stationId} port={portDialog.port} onClose={() => setPortDialog({ open: false, stationId: '', port: null })} onSuccess={(_port, mode) => { setPortDialog({ open: false, stationId: '', port: null }); void refresh(); pushToast({ title: mode === 'created' ? 'Charging port added' : 'Charging port updated', tone: 'success' }); }} />
+      <ConfirmDialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onConfirm={() => void handleDelete()} title={`Remove ${deleteName}?`} description={<><strong>{deleteName}</strong> will be marked inactive rather than erased. The backend may reject this action while reservations, charging, or waitlist work is still active.</>} confirmLabel={deleteTarget?.kind === 'station' ? 'Deactivate station' : 'Remove port'} isLoading={isDeleting} />
     </div>
   );
 }

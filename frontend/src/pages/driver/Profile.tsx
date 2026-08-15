@@ -1,191 +1,145 @@
-import { useState, useEffect } from 'react';
-import { useAuth } from '../../context/AuthContext';
-import { authService } from '../../services/api';
-import { Save, AlertTriangle, AlertCircle, CheckCircle2, User as UserIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CalendarDays, KeyRound, Save, ShieldAlert, UserRound } from 'lucide-react';
+import { useAuth } from '../../context/auth-context';
+import { authService } from '../../services/api';
+import { formatDate } from '../../lib/format';
+import { getErrorMessage } from '../../lib/errors';
+import { Button } from '../../ui/Button';
+import { ConfirmDialog } from '../../ui/ConfirmDialog';
+import { Alert } from '../../ui/Feedback';
+import { Field } from '../../ui/Field';
+import { PageHeader, SectionHeader } from '../../ui/Page';
+import { useToast } from '../../ui/ToastContext';
+import { Badge } from '../../ui/Badge';
 
-const Profile = () => {
-  const { user, logout } = useAuth();
+export default function Profile() {
+  const { user, fetchUser, logout } = useAuth();
   const navigate = useNavigate();
-  
-  const [formData, setFormData] = useState({
-    full_name: '',
-    email: '',
-    phone_number: ''
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [message, setMessage] = useState({ type: '', text: '' });
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const { pushToast } = useToast();
+  const [profile, setProfile] = useState({ full_name: '', phone_number: '' });
+  const [password, setPassword] = useState({ current: '', next: '', confirm: '' });
+  const [profileError, setProfileError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      setFormData({
-        full_name: user.full_name,
-        email: user.email,
-        phone_number: user.phone_number || ''
-      });
-    }
+    if (user) setProfile({ full_name: user.full_name ?? '', phone_number: user.phone_number ?? '' });
   }, [user]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
-  };
-
-  const handleUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setMessage({ type: '', text: '' });
-    setIsSubmitting(true);
-
+  const handleProfileSave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setProfileError('');
+    setIsSavingProfile(true);
     try {
-      await authService.updateProfile({
-        full_name: formData.full_name,
-        phone_number: formData.phone_number
-      });
-      setMessage({ type: 'success', text: 'Profile updated successfully.' });
-      // To strictly follow instructions: update state globally by forcing a reload 
-      // or dispatching an event if fetchUser was globally available. 
-      // Since context doesn't expose fetchUser directly, we will just reload the page to sync state.
-      setTimeout(() => window.location.reload(), 1000);
-    } catch (err: any) {
-      console.error(err);
-      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to update profile.' });
+      await authService.updateProfile({ full_name: profile.full_name.trim(), phone_number: profile.phone_number.trim() });
+      await fetchUser();
+      pushToast({ title: 'Profile updated', message: 'Your account details are up to date.', tone: 'success' });
+    } catch (saveError) {
+      setProfileError(getErrorMessage(saveError, 'Your profile could not be updated.'));
     } finally {
-      setIsSubmitting(false);
+      setIsSavingProfile(false);
     }
   };
 
-  const handleDeleteAccount = async () => {
+  const handlePasswordSave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setPasswordError('');
+    if (password.next.length < 8) {
+      setPasswordError('The new password must contain at least 8 characters.');
+      return;
+    }
+    if (password.next !== password.confirm) {
+      setPasswordError('The new passwords do not match.');
+      return;
+    }
+    setIsSavingPassword(true);
+    try {
+      await authService.updatePassword(password.current, password.next);
+      setPassword({ current: '', next: '', confirm: '' });
+      pushToast({ title: 'Password changed', message: 'Use your new password the next time you sign in.', tone: 'success' });
+    } catch (saveError) {
+      setPasswordError(getErrorMessage(saveError, 'Your password could not be changed.'));
+    } finally {
+      setIsSavingPassword(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
     try {
       await authService.deleteAccount();
-      logout();
-      navigate('/login');
-    } catch (err: any) {
-      console.error(err);
-      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to delete account.' });
-      setShowDeleteConfirm(false);
+      await logout();
+      navigate('/login', { replace: true });
+    } catch (deleteError) {
+      setDeleteOpen(false);
+      pushToast({ title: 'Couldn’t close the account', message: getErrorMessage(deleteError, 'Resolve active reservations or charging sessions and try again.'), tone: 'error' });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto flex flex-col gap-6 h-full">
-      <header className="flex justify-between items-end skeuo-panel p-6 shadow-sm border border-white/40">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <div className="p-2 bg-skeuo-dark rounded-xl shadow-skeuo-pressed">
-              <UserIcon size={24} className="text-skeuo-accent" />
-            </div>
-            My Profile
-          </h1>
-          <p className="text-skeuo-text-muted mt-2">Manage your personal information and account settings.</p>
-        </div>
-      </header>
+    <div className="flex flex-col gap-7 enter-up">
+      <PageHeader eyebrow="Account" title="Profile & security" description="Manage the details tied to your driver account." />
 
-      {message.text && (
-        <div className={`p-4 rounded-xl border flex items-center gap-2 font-medium ${message.type === 'error' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
-          {message.type === 'error' ? <AlertCircle size={20} /> : <CheckCircle2 size={20} />}
-          {message.text}
-        </div>
-      )}
-
-      <div className="skeuo-panel p-6">
-        <h2 className="text-xl font-bold mb-4 border-b border-white/10 pb-4">Personal Information</h2>
-        
-        <form onSubmit={handleUpdate} className="flex flex-col gap-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="skeuo-text-field-group">
-              <label className="skeuo-label">Full Name</label>
-              <input
-                type="text"
-                name="full_name"
-                value={formData.full_name}
-                onChange={handleChange}
-                required
-                className="skeuo-input"
-              />
-            </div>
-            
-            <div className="skeuo-text-field-group">
-              <label className="skeuo-label">Phone Number</label>
-              <input
-                type="text"
-                name="phone_number"
-                value={formData.phone_number}
-                onChange={handleChange}
-                className="skeuo-input"
-                placeholder="+91..."
-              />
-            </div>
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]">
+        <form onSubmit={handleProfileSave} className="surface p-5 sm:p-6">
+          <SectionHeader title="Personal details" description="Your email remains the identifier used to sign in." />
+          {profileError && <Alert tone="error" className="mt-5">{profileError}</Alert>}
+          <div className="mt-5 grid gap-5 sm:grid-cols-2">
+            <Field label="Full name">
+              {({ id, describedBy, invalid }) => <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control" value={profile.full_name} onChange={(event) => setProfile((current) => ({ ...current, full_name: event.target.value }))} autoComplete="name" required />}
+            </Field>
+            <Field label="Phone number" optional>
+              {({ id, describedBy, invalid }) => <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control" value={profile.phone_number} onChange={(event) => setProfile((current) => ({ ...current, phone_number: event.target.value }))} autoComplete="tel" inputMode="tel" placeholder="+91 98765 43210" />}
+            </Field>
           </div>
-          
-          <div className="skeuo-text-field-group">
-            <label className="skeuo-label">Email Address</label>
-            <input
-              type="email"
-              value={formData.email}
-              disabled
-              className="skeuo-input opacity-70 cursor-not-allowed"
-              title="Email cannot be changed"
-            />
-            <p className="text-xs text-skeuo-text-muted px-1">Your email address is used for login and cannot be changed.</p>
-          </div>
-
-          <div className="flex justify-end mt-4 pt-4 border-t border-white/10">
-            <button 
-              type="submit" 
-              className="skeuo-btn skeuo-btn-primary"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <Save size={18} />
-                  <span>Save Changes</span>
-                </>
-              )}
-            </button>
-          </div>
+          <Field label="Email address" hint="Email changes are not supported by the current account API." className="mt-5">
+            {({ id, describedBy }) => <input id={id} aria-describedby={describedBy} className="field-control" value={user?.email ?? ''} type="email" disabled />}
+          </Field>
+          <div className="mt-6 flex justify-end border-t border-[var(--line)] pt-5"><Button type="submit" variant="primary" icon={<Save size={17} />} isLoading={isSavingProfile}>Save details</Button></div>
         </form>
-      </div>
 
-      <div className="skeuo-panel p-6 border-red-500/30">
-        <h2 className="text-xl font-bold mb-4 text-red-500 flex items-center gap-2">
-          <AlertTriangle size={24} />
-          Danger Zone
-        </h2>
-        <p className="text-skeuo-text-muted mb-6">
-          Permanently delete your account and all associated data. This action cannot be undone. Active charging sessions or reservations must be resolved before deletion.
-        </p>
-        
-        {!showDeleteConfirm ? (
-          <button 
-            onClick={() => setShowDeleteConfirm(true)}
-            className="skeuo-btn text-red-500 border-red-500/30 hover:bg-red-500/10 active:bg-red-500/20"
-          >
-            Delete Account
-          </button>
-        ) : (
-          <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-xl">
-            <p className="font-bold text-red-500 mb-4">Are you absolutely sure you want to delete your account?</p>
-            <div className="flex gap-4">
-              <button 
-                onClick={handleDeleteAccount}
-                className="skeuo-btn bg-red-500 text-white hover:bg-red-600 border-transparent shadow-[4px_4px_10px_rgba(239,68,68,0.3)] active:shadow-inner"
-              >
-                Yes, Delete My Account
-              </button>
-              <button 
-                onClick={() => setShowDeleteConfirm(false)}
-                className="skeuo-btn bg-skeuo-base"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+        <aside className="surface p-5 sm:p-6">
+          <div className="flex size-14 items-center justify-center rounded-full bg-[var(--teal-soft)] text-[var(--teal-dark)]"><UserRound size={26} /></div>
+          <h2 className="font-display mt-4 text-xl font-bold">{user?.full_name || 'Electra driver'}</h2>
+          <p className="mt-1 break-all text-sm text-[var(--steel)]">{user?.email}</p>
+          <div className="mt-5 flex flex-wrap gap-2"><Badge tone="info">{user?.role}</Badge>{user?.is_suspended && <Badge tone="danger">Suspended</Badge>}</div>
+          <dl className="mt-6 border-t border-[var(--line)] pt-5">
+            <div className="flex items-center justify-between gap-3"><dt className="flex items-center gap-2 text-sm text-[var(--steel)]"><CalendarDays size={17} /> Member since</dt><dd className="text-sm font-bold">{user?.created_at ? formatDate(user.created_at) : '—'}</dd></div>
+          </dl>
+        </aside>
+      </section>
+
+      <form onSubmit={handlePasswordSave} className="surface p-5 sm:p-6">
+        <SectionHeader title="Change password" description="Use at least 8 characters; common passwords are blocked." />
+        {passwordError && <Alert tone="error" className="mt-5">{passwordError}</Alert>}
+        <div className="mt-5 grid gap-5 lg:grid-cols-3">
+          <Field label="Current password">
+            {({ id, describedBy, invalid }) => <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control" type="password" autoComplete="current-password" value={password.current} onChange={(event) => setPassword((current) => ({ ...current, current: event.target.value }))} required />}
+          </Field>
+          <Field label="New password">
+            {({ id, describedBy, invalid }) => <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control" type="password" autoComplete="new-password" minLength={8} value={password.next} onChange={(event) => setPassword((current) => ({ ...current, next: event.target.value }))} required />}
+          </Field>
+          <Field label="Confirm new password">
+            {({ id, describedBy, invalid }) => <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control" type="password" autoComplete="new-password" minLength={8} value={password.confirm} onChange={(event) => setPassword((current) => ({ ...current, confirm: event.target.value }))} required />}
+          </Field>
+        </div>
+        <div className="mt-6 flex justify-end border-t border-[var(--line)] pt-5"><Button type="submit" icon={<KeyRound size={17} />} isLoading={isSavingPassword}>Change password</Button></div>
+      </form>
+
+      <section className="rounded-[var(--radius-lg)] border border-[var(--red)]/30 bg-[var(--red-soft)] p-5 sm:p-6">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-3"><ShieldAlert size={23} className="mt-0.5 shrink-0 text-[var(--red)]" /><div><h2 className="font-display text-lg font-bold text-[var(--red-dark)]">Close account</h2><p className="mt-1 max-w-2xl text-sm text-[#74403d]">This soft-deletes the account and signs you out. Active reservations or charging sessions must be resolved first.</p></div></div>
+          <Button variant="danger" onClick={() => setDeleteOpen(true)}>Close account</Button>
+        </div>
+      </section>
+
+      <ConfirmDialog open={deleteOpen} onClose={() => setDeleteOpen(false)} onConfirm={() => void handleDelete()} title="Close your Electra account?" description="You will be signed out and this account will no longer be active. This action cannot be reversed from the app." confirmLabel="Close my account" isLoading={isDeleting} />
     </div>
   );
-};
-
-export default Profile;
+}

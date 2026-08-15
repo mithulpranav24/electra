@@ -1,112 +1,80 @@
-import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
-import { Lock, Mail, ArrowRight } from 'lucide-react';
-import { api } from '../services/api';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react';
+import { useAuth } from '../context/auth-context';
+import { authService } from '../services/api';
+import { getErrorMessage } from '../lib/errors';
+import { AuthLayout } from '../components/AuthLayout';
+import { Alert } from '../ui/Feedback';
+import { Field } from '../ui/Field';
+import { Button, IconButton } from '../ui/Button';
 
-const Login: React.FC = () => {
+interface LoginLocationState { registered?: boolean; }
+
+export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { login, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const state = location.state as LoginLocationState | null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    const home = user.role === 'Driver' ? '/driver/dashboard' : user.role === 'Operator' ? '/operator/dashboard' : '/admin/dashboard';
+    navigate(home, { replace: true });
+  }, [isAuthenticated, navigate, user]);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
-    
+    setIsSubmitting(true);
     try {
-      const formData = new URLSearchParams();
-      formData.append('username', email);
-      formData.append('password', password);
-
-      const response = await api.post('/auth/login', formData, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      });
-      
-      login(response.data.access_token);
-      // Removed immediate navigate('/dashboard') to wait for user state
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        setError(detail.map((d: any) => d.msg).join(', '));
-      } else {
-        setError(detail || 'Login failed');
-      }
+      const response = await authService.login(email.trim(), password);
+      login(response.access_token);
+    } catch (submitError) {
+      setError(getErrorMessage(submitError, 'Sign-in failed. Check your details and try again.'));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  React.useEffect(() => {
-    if (isAuthenticated && user) {
-      if (user.role === 'Driver') navigate('/driver/dashboard', { replace: true });
-      else if (user.role === 'Operator') navigate('/operator/dashboard', { replace: true });
-      else if (user.role === 'Admin') navigate('/admin/dashboard', { replace: true });
-      else navigate('/', { replace: true });
-    }
-  }, [isAuthenticated, user, navigate]);
-
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="skeuo-panel w-full max-w-md p-8 flex flex-col gap-6">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-skeuo-text">Welcome Back</h1>
-          <p className="text-skeuo-text-muted mt-2">Sign in to your Electra account</p>
-        </div>
+    <AuthLayout mode="login">
+      <form onSubmit={handleSubmit} className="flex min-w-0 flex-col gap-5" noValidate>
+        {state?.registered && <Alert tone="success" title="Account created">Sign in with the email and password you just registered.</Alert>}
+        {error && <Alert tone="error" title="Couldn’t sign you in">{error}</Alert>}
 
-        {error && (
-          <div className="bg-red-100/50 text-red-600 p-3 rounded-xl text-sm border border-red-200 text-center">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-          <div className="skeuo-text-field-group">
-            <label className="skeuo-label">Email</label>
+        <Field label="Email address">
+          {({ id, describedBy, invalid }) => (
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-skeuo-text-muted" size={18} />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="skeuo-input pl-10 w-full"
-                placeholder="driver@example.com"
-              />
+              <Mail size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control field-control-leading" type="email" autoComplete="email" inputMode="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required autoFocus />
             </div>
-          </div>
+          )}
+        </Field>
 
-          <div className="skeuo-text-field-group">
-            <label className="skeuo-label">Password</label>
+        <Field label="Password">
+          {({ id, describedBy, invalid }) => (
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-skeuo-text-muted" size={18} />
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="skeuo-input pl-10 w-full"
-                placeholder="••••••••"
-              />
+              <LockKeyhole size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control field-control-both" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" required />
+              <IconButton label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-1 top-1/2 size-9 -translate-y-1/2 border-0 bg-transparent" onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</IconButton>
             </div>
-          </div>
+          )}
+        </Field>
 
-          <button type="submit" className="skeuo-btn skeuo-btn-primary mt-2">
-            <span>Sign In</span>
-            <ArrowRight size={18} />
-          </button>
-        </form>
+        <Button type="submit" variant="primary" size="lg" className="mt-1 w-full" isLoading={isSubmitting} icon={<ArrowRight size={18} />}>
+          Sign in
+        </Button>
 
-        <p className="text-center text-sm text-skeuo-text-muted mt-4">
-          Don't have an account?{' '}
-          <Link to="/register" className="text-skeuo-accent font-semibold hover:underline">
-            Register here
-          </Link>
+        <p className="text-center text-sm text-[var(--steel)]">
+          New to Electra? <Link to="/register" className="font-bold text-[var(--teal-dark)] underline-offset-4 hover:underline">Create an account</Link>
         </p>
-      </div>
-    </div>
+      </form>
+    </AuthLayout>
   );
-};
-
-export default Login;
+}
