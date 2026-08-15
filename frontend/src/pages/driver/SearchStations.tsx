@@ -90,7 +90,7 @@ export function SearchStations() {
       <form className="surface grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(12rem,1fr)_minmax(12rem,1fr)_auto] lg:items-end" onSubmit={(event) => { event.preventDefault(); void runSearch(connectorType, fastOnly); }}>
         <Field label="Connector type">
           {({ id, describedBy }) => (
-            <div className="relative"><Filter size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" /><select id={id} aria-describedby={describedBy} className="field-control pl-10" value={connectorType} onChange={(event) => setConnectorType(event.target.value)}><option value="">Any connector</option><option value="CCS2">CCS 2</option><option value="CHAdeMO">CHAdeMO</option><option value="Type 2">Type 2</option></select></div>
+            <div className="relative"><Filter size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" /><select id={id} aria-describedby={describedBy} className="field-control field-control-filter" value={connectorType} onChange={(event) => setConnectorType(event.target.value)}><option value="">Any connector</option><option value="CCS2">CCS 2</option><option value="CHAdeMO">CHAdeMO</option><option value="Type 2">Type 2</option></select></div>
           )}
         </Field>
         <div>

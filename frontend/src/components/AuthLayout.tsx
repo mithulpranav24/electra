@@ -28,15 +28,15 @@ export function AuthLayout({ children, mode }: { children: ReactNode; mode: 'log
         </div>
       </section>
 
-      <section className="flex min-h-screen items-center justify-center px-4 py-8 sm:px-8 lg:px-12">
-        <div className="w-full max-w-[31rem]">
+      <section className="flex min-h-screen min-w-0 items-center justify-center overflow-x-hidden px-4 py-8 sm:px-8 lg:px-12">
+        <div className="w-full min-w-0 max-w-[31rem]">
           <div className="mb-8 lg:hidden"><BrandMark /></div>
           <div className="mb-7">
             <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.16em] text-[var(--teal)]">{mode === 'login' ? 'Welcome back' : 'Create your driver account'}</p>
-            <h1 className="font-display text-4xl font-bold tracking-[-0.035em]">{mode === 'login' ? 'Continue your journey' : 'Get road-ready'}</h1>
+            <h1 className="font-display text-3xl font-bold tracking-[-0.035em] sm:text-4xl">{mode === 'login' ? 'Continue your journey' : 'Get road-ready'}</h1>
             <p className="mt-2 text-[var(--steel)]">{mode === 'login' ? 'Sign in to access your Electra workspace.' : 'Set up your account now; add a vehicle and funds after sign-in.'}</p>
           </div>
-          <div className="surface p-5 sm:p-7">{children}</div>
+          <div className="surface min-w-0 p-5 sm:p-7">{children}</div>
         </div>
       </section>
     </main>

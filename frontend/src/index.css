@@ -111,6 +111,8 @@ textarea:focus-visible,
 
 .field-control {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 2.875rem;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
@@ -119,6 +121,12 @@ textarea:focus-visible,
   padding: 0.72rem 0.85rem;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
 }
+
+.field-control-leading { padding-left: 2.75rem; }
+.field-control-trailing { padding-right: 3.5rem; }
+.field-control-both { padding-inline: 2.75rem; }
+.field-control-money { padding-left: 2rem; }
+.field-control-filter { padding-left: 2.5rem; }
 
 .field-control:hover:not(:disabled) { border-color: #8fa198; }
 .field-control:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgb(8 127 109 / 0.12); outline: none; }

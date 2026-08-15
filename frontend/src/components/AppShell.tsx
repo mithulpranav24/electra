@@ -11,7 +11,7 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth-context';
 import type { UserRole } from '../types';
 import { formatCurrency } from '../lib/format';
 import { BrandMark } from './BrandMark';

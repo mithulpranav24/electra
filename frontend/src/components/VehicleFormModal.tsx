@@ -86,7 +86,7 @@ export default function VehicleFormModal({ open, vehicle, onClose, onSuccess }: 
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Battery capacity" hint="Accepted range: 2–250 kWh.">
-            {({ id, describedBy, invalid }) => <div className="relative"><input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control pr-14" type="number" min={2} max={250} step="0.1" value={formData.battery_capacity_kwh} onChange={(event) => setField('battery_capacity_kwh', Number(event.target.value))} required /><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-[var(--steel)]">kWh</span></div>}
+            {({ id, describedBy, invalid }) => <div className="relative"><input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control field-control-trailing" type="number" min={2} max={250} step="0.1" value={formData.battery_capacity_kwh} onChange={(event) => setField('battery_capacity_kwh', Number(event.target.value))} required /><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-[var(--steel)]">kWh</span></div>}
           </Field>
           <Field label="Connector">
             {({ id, describedBy, invalid }) => (

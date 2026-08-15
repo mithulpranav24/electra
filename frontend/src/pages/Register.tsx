@@ -44,14 +44,14 @@ export default function Register() {
 
   return (
     <AuthLayout mode="register">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
+      <form onSubmit={handleSubmit} className="flex min-w-0 flex-col gap-5" noValidate>
         {error && <Alert tone="error" title="Couldn’t create your account">{error}</Alert>}
 
         <Field label="Full name" optional hint="You can also add this later from your account settings.">
           {({ id, describedBy, invalid }) => (
             <div className="relative">
               <UserRound size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
-              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control pl-11" type="text" autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your name" autoFocus />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control field-control-leading" type="text" autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your name" autoFocus />
             </div>
           )}
         </Field>
@@ -60,7 +60,7 @@ export default function Register() {
           {({ id, describedBy, invalid }) => (
             <div className="relative">
               <Mail size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
-              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control pl-11" type="email" autoComplete="email" inputMode="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control field-control-leading" type="email" autoComplete="email" inputMode="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required />
             </div>
           )}
         </Field>
@@ -69,7 +69,7 @@ export default function Register() {
           {({ id, describedBy, invalid }) => (
             <div className="relative">
               <LockKeyhole size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
-              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control px-11" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Create a password" required />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control field-control-both" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Create a password" required />
               <IconButton label={showPasswords ? 'Hide passwords' : 'Show passwords'} className="absolute right-1 top-1/2 size-9 -translate-y-1/2 border-0 bg-transparent" onClick={() => setShowPasswords((value) => !value)}>{showPasswords ? <EyeOff size={18} /> : <Eye size={18} />}</IconButton>
             </div>
           )}

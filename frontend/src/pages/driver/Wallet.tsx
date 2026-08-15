@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CreditCard, Plus, ReceiptText, ShieldCheck, WalletCards } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/auth-context';
 import { walletService } from '../../services/api';
 import type { PaymentMethod, WalletTransaction } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
@@ -89,7 +89,7 @@ export default function Wallet() {
                 {topUpOptions.map((option) => <button key={option} type="button" className={`min-h-10 flex-1 rounded-lg border px-2 text-sm font-bold transition ${Number(amount) === option ? 'border-[var(--teal)] bg-[var(--teal-soft)] text-[var(--teal-dark)]' : 'border-[var(--line)] bg-white text-[var(--steel-dark)] hover:border-[var(--line-strong)]'}`} onClick={() => setAmount(String(option))}>{formatCurrency(option, 0)}</button>)}
               </div>
               <Field label="Top-up amount" hint="Minimum ₹100." className="mt-4">
-                {({ id, describedBy, invalid }) => <div className="relative"><span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-[var(--steel)]">₹</span><input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control pl-8" type="number" min={100} step={1} value={amount} onChange={(event) => setAmount(event.target.value)} required /></div>}
+                {({ id, describedBy, invalid }) => <div className="relative"><span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-[var(--steel)]">₹</span><input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control field-control-money" type="number" min={100} step={1} value={amount} onChange={(event) => setAmount(event.target.value)} required /></div>}
               </Field>
               {error && <p className="mt-2 text-sm font-semibold text-[var(--red)]" role="alert">{error}</p>}
               <Button type="submit" variant="primary" className="mt-5 w-full" icon={<Plus size={17} />} isLoading={isSubmitting}>Add funds</Button>
