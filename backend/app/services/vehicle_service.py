@@ -27,6 +27,10 @@ class VehicleService:
         old_defaults = db.query(Vehicle).filter(Vehicle.user_id == user_id, Vehicle.is_default == True).all()
         for old_default in old_defaults:
             old_default.is_default = False
+            
+        # Flush the session to ensure the database sees is_default=False 
+        # before we set a new vehicle to is_default=True, avoiding UniqueViolation
+        db.flush()
 
     @staticmethod
     def create_vehicle(db: Session, vehicle_in: VehicleCreate, user_id: UUID) -> Vehicle:
