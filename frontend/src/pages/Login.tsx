@@ -8,7 +8,7 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login } = useAuth();
+  const { login, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -27,7 +27,7 @@ const Login: React.FC = () => {
       });
       
       login(response.data.access_token);
-      navigate('/dashboard');
+      // Removed immediate navigate('/dashboard') to wait for user state
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       if (Array.isArray(detail)) {
@@ -37,6 +37,15 @@ const Login: React.FC = () => {
       }
     }
   };
+
+  React.useEffect(() => {
+    if (isAuthenticated && user) {
+      if (user.role === 'Driver') navigate('/driver/dashboard', { replace: true });
+      else if (user.role === 'Operator') navigate('/operator/dashboard', { replace: true });
+      else if (user.role === 'Admin') navigate('/admin/dashboard', { replace: true });
+      else navigate('/', { replace: true });
+    }
+  }, [isAuthenticated, user, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">

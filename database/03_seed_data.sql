@@ -8,7 +8,7 @@ VALUES (
     '$2b$12$ZsIvRipWywS5lRgIP26EeOxkeRr1mKcAKOs6LLML.D70xL2QkveCG',
     'System Admin',
     '1234567890',
-    'Administrator',
+    'Admin',
     10000.00
 ) ON CONFLICT DO NOTHING;
 
