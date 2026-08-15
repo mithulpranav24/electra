@@ -27,7 +27,7 @@ export const SearchStations: React.FC = () => {
   const [stations, setStations] = useState<Station[]>([]);
   const [recentStations, setRecentStations] = useState<Station[]>([]);
   const [favorites, setFavorites] = useState<any[]>([]);
-  const [radius, setRadius] = useState(10);
+  const [radius, setRadius] = useState<number | string>(10);
   const [connectorType, setConnectorType] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -41,11 +41,15 @@ export const SearchStations: React.FC = () => {
     setLoading(true);
     setError('');
     try {
+      // Ensure radius is a valid number, otherwise default to 10
+      const parsedRadius = Number(radius);
+      const finalRadius = parsedRadius > 0 && parsedRadius <= 500 ? parsedRadius : 10;
+      
       // Note: Axios interceptor already unwraps { success, data } -> data directly
       const { data } = await api.post('/search/stations', {
         lat: userLat,
         lng: userLng,
-        radius_km: radius,
+        radius_km: finalRadius,
         connector_type: connectorType || null,
       });
       setStations(Array.isArray(data) ? data : []);
@@ -79,7 +83,7 @@ export const SearchStations: React.FC = () => {
             <input
               type="number"
               value={radius}
-              onChange={(e) => setRadius(Number(e.target.value))}
+              onChange={(e) => setRadius(e.target.value === '' ? '' : Number(e.target.value))}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
             />
           </div>
