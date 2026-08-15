@@ -1,191 +1,173 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { api, favoriteService } from '../../services/api';
-import { MapPin, Zap, Clock, ArrowLeft, Heart } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Clock3, Heart, MapPin, PlugZap, ShieldAlert, WalletCards, Zap } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { favoriteService, reservationService, searchService, vehicleService } from '../../services/api';
+import type { ChargingPort, Reservation, Station, Vehicle } from '../../types';
+import { getErrorMessage } from '../../lib/errors';
+import { formatCurrency, normalizeConnector, vehicleId } from '../../lib/format';
 import { ReservationModal } from '../../components/ReservationModal';
+import { Alert, EmptyState, ErrorState, LoadingState } from '../../ui/Feedback';
+import { Badge, statusTone } from '../../ui/Badge';
+import { Button, IconButton } from '../../ui/Button';
+import { SectionHeader } from '../../ui/Page';
+import { useToast } from '../../ui/ToastContext';
 
-export const StationDetails: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+interface StationPageData {
+  station: Station;
+  vehicles: Vehicle[];
+  activeReservations: Reservation[];
+}
+
+export function StationDetails() {
+  const { id = '' } = useParams<{ id: string }>();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const [station, setStation] = useState<any>(null);
-  const [vehicles, setVehicles] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { pushToast } = useToast();
+  const [data, setData] = useState<StationPageData | null>(null);
   const [error, setError] = useState('');
-  
-  const [selectedPort, setSelectedPort] = useState<any>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [reserving, setReserving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
-  const [togglingFavorite, setTogglingFavorite] = useState(false);
+  const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
+  const [selectedPort, setSelectedPort] = useState<ChargingPort | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] = useState('');
+  const [isReserving, setIsReserving] = useState(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Note: Axios interceptor already unwraps { success, data } -> data directly
-        const [stationData, vehiclesData] = await Promise.all([
-          api.get(`/search/stations/${id}`).then(r => r.data),
-          api.get('/vehicles').then(r => r.data)
-        ]);
-
-        if (stationData) {
-          setStation(stationData);
-        } else {
-          setError('Failed to fetch station');
-        }
-
-        if (Array.isArray(vehiclesData)) {
-          setVehicles(vehiclesData);
-        }
-
-        // Check favorite status
-        const favRes = await favoriteService.getFavorites();
-        if (favRes && Array.isArray(favRes)) {
-          const isFav = favRes.some((f: any) => f.station_id === id);
-          setIsFavorite(isFav);
-        }
-      } catch (err: any) {
-        setError('Failed to load details');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
+  const loadStation = useCallback(async () => {
+    setError('');
+    setIsLoading(true);
+    try {
+      const [station, vehicles, activeReservations, favorites] = await Promise.all([
+        searchService.getStation(id),
+        vehicleService.getVehicles(),
+        reservationService.getActive(),
+        favoriteService.getFavorites().catch(() => []),
+      ]);
+      setData({ station, vehicles, activeReservations });
+      setIsFavorite(favorites.some((favorite) => favorite.station_id === id));
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, 'Station details could not be loaded.'));
+    } finally {
+      setIsLoading(false);
+    }
   }, [id]);
 
-  const handleReserve = async () => {
-    if (!selectedPort) return;
-    
-    // For now, use the default vehicle or first vehicle
-    const defaultVehicle = vehicles.find(v => v.is_default) || vehicles[0];
-    
-    if (!defaultVehicle) {
-      alert("Please add a vehicle first in your profile.");
-      return;
-    }
-    
-    setReserving(true);
-    try {
-      // Interceptor unwraps the response; a resolved promise means success
-      await api.post('/reservations', {
-        port_id: selectedPort.port_id,
-        vehicle_id: defaultVehicle.vehicle_id
-      });
-      alert("Reservation successful! ₹1,000 escrow has been held.");
-      setIsModalOpen(false);
-      navigate('/driver/dashboard');
-    } catch (err: any) {
-      alert(err.message || "Error reserving port");
-    } finally {
-      setReserving(false);
-    }
+  useEffect(() => { void loadStation(); }, [loadStation]);
+
+  const compatibleVehicles = useMemo(() => {
+    if (!selectedPort || !data) return [];
+    return data.vehicles.filter((vehicle) => normalizeConnector(vehicle.connector_type) === normalizeConnector(selectedPort.connector_type));
+  }, [data, selectedPort]);
+
+  const openReservation = (port: ChargingPort) => {
+    setSelectedPort(port);
+    const compatible = data?.vehicles.filter((vehicle) => normalizeConnector(vehicle.connector_type) === normalizeConnector(port.connector_type)) ?? [];
+    const preferred = compatible.find((vehicle) => vehicle.is_default) ?? compatible[0];
+    setSelectedVehicleId(preferred ? vehicleId(preferred) : '');
   };
 
-  const handleToggleFavorite = async () => {
+  const handleFavorite = async () => {
     if (!id) return;
-    setTogglingFavorite(true);
+    setIsTogglingFavorite(true);
     try {
-      if (isFavorite) {
-        await favoriteService.removeFavorite(id);
-        setIsFavorite(false);
-      } else {
-        await favoriteService.addFavorite(id);
-        setIsFavorite(true);
-      }
-    } catch (err: any) {
-      alert("Failed to update favorite status");
+      if (isFavorite) await favoriteService.removeFavorite(id);
+      else await favoriteService.addFavorite(id);
+      setIsFavorite((value) => !value);
+      pushToast({ title: isFavorite ? 'Removed from saved stations' : 'Station saved', tone: 'success' });
+    } catch (favoriteError) {
+      pushToast({ title: 'Couldn’t update saved stations', message: getErrorMessage(favoriteError, 'Try again.'), tone: 'error' });
     } finally {
-      setTogglingFavorite(false);
+      setIsTogglingFavorite(false);
     }
   };
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading...</div>;
-  if (error) return <div className="p-8 text-center text-red-500">{error}</div>;
-  if (!station) return <div className="p-8 text-center">Station not found</div>;
+  const handleReserve = async () => {
+    if (!selectedPort || !selectedVehicleId) return;
+    setIsReserving(true);
+    try {
+      await reservationService.create({ port_id: selectedPort.port_id, vehicle_id: selectedVehicleId });
+      setSelectedPort(null);
+      pushToast({ title: 'Reservation confirmed', message: 'Your ₹1,000 escrow is held. Arrive and plug in within 15 minutes.', tone: 'success' });
+      navigate('/driver/sessions');
+    } catch (reserveError) {
+      pushToast({ title: 'Couldn’t reserve the port', message: getErrorMessage(reserveError, 'The port may no longer be available.'), tone: 'error' });
+    } finally {
+      setIsReserving(false);
+    }
+  };
+
+  if (isLoading) return <div className="surface"><LoadingState label="Loading station" /></div>;
+  if (error || !data) return <ErrorState title="Station unavailable" description={error || 'The station was not found.'} onRetry={() => void loadStation()} />;
+
+  const { station, activeReservations } = data;
+  const availableCount = station.ports.filter((port) => port.status === 'Available' && port.is_active).length;
+  const hours = station.opening_time_local && station.closing_time_local ? `${station.opening_time_local.slice(0, 5)}–${station.closing_time_local.slice(0, 5)}` : 'Open 24 hours';
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <button 
-        onClick={() => navigate('/driver/search')}
-        className="flex items-center text-emerald-600 hover:text-emerald-700 transition-colors mb-4"
-      >
-        <ArrowLeft className="w-4 h-4 mr-1" /> Back to Search
-      </button>
+    <div className="flex flex-col gap-6 enter-up">
+      <Link to="/driver/search" className="inline-flex w-fit items-center gap-1.5 text-sm font-bold text-[var(--teal-dark)] hover:underline"><ArrowLeft size={17} /> Back to station search</Link>
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-        <div className="flex justify-between items-start mb-2">
-          <h1 className="text-3xl font-bold text-gray-800">{station.name}</h1>
-          <button 
-            onClick={handleToggleFavorite}
-            disabled={togglingFavorite}
-            className={`p-2 rounded-full transition-colors ${isFavorite ? 'bg-red-50 text-red-500' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-red-400'}`}
-          >
-            <Heart className="w-6 h-6" fill={isFavorite ? "currentColor" : "none"} />
-          </button>
-        </div>
-        
-        <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-6">
-          <span className="flex items-center gap-1">
-            <Zap className="w-4 h-4 text-yellow-500" /> ₹{station.price_per_kwh}/kWh
-          </span>
-          <span className="flex items-center gap-1">
-            <Clock className="w-4 h-4" /> {station.opening_time_local || '24/7'} - {station.closing_time_local || '24/7'}
-          </span>
-          <span className="flex items-center gap-1">
-            <MapPin className="w-4 h-4" /> Lat: {station.lat.toFixed(4)}, Lng: {station.lng.toFixed(4)}
-          </span>
-        </div>
-        
-        <h2 className="text-xl font-semibold text-gray-800 mb-4 border-b pb-2">Available Ports</h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {station.ports.map((port: any) => (
-            <div 
-              key={port.port_id} 
-              className={`p-4 rounded-xl border ${port.status === 'Available' ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-gray-50'} transition-colors`}
-            >
-              <div className="flex justify-between items-start mb-2">
-                <span className="font-medium text-gray-800">{port.connector_type}</span>
-                <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                  port.status === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-700'
-                }`}>
-                  {port.status}
-                </span>
-              </div>
-              <div className="text-sm text-gray-500 mb-4">
-                {port.charger_type}
-              </div>
-              
-              <button
-                disabled={port.status !== 'Available' || reserving}
-                onClick={() => {
-                  setSelectedPort(port);
-                  setIsModalOpen(true);
-                }}
-                className="w-full px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-emerald-700 transition-colors"
-              >
-                Reserve Port
-              </button>
+      <section className="overflow-hidden rounded-[var(--radius-lg)] bg-[var(--night)] text-white shadow-[var(--shadow-md)]">
+        <div className="flex flex-col gap-5 p-5 sm:p-7 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="mb-3 flex flex-wrap gap-2"><Badge tone={availableCount > 0 ? 'success' : 'neutral'}>{availableCount} available</Badge>{station.locked_gate && <Badge tone="warning">Locked gate</Badge>}</div>
+            <h1 className="font-display text-3xl font-bold tracking-[-0.035em] sm:text-4xl">{station.name}</h1>
+            <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-white/65">
+              <span className="font-data flex items-center gap-1.5"><Zap size={16} className="text-[var(--amber)]" /> {formatCurrency(station.price_per_kwh)}/kWh</span>
+              <span className="flex items-center gap-1.5"><Clock3 size={16} /> {hours}</span>
+              <span className="font-data flex items-center gap-1.5"><MapPin size={16} /> {station.lat.toFixed(4)}, {station.lng.toFixed(4)}</span>
             </div>
-          ))}
-          {station.ports.length === 0 && (
-            <div className="col-span-full text-center text-gray-500 py-8">
-              No charging ports found at this station.
-            </div>
-          )}
+          </div>
+          <IconButton label={isFavorite ? 'Remove from saved stations' : 'Save station'} onClick={() => void handleFavorite()} disabled={isTogglingFavorite} className={`border-white/15 ${isFavorite ? '!bg-[var(--red-soft)] !text-[var(--red)]' : '!bg-white/10 !text-white hover:!bg-white/20'}`}><Heart size={20} fill={isFavorite ? 'currentColor' : 'none'} /></IconButton>
         </div>
-      </div>
+        <dl className="grid border-t border-white/10 sm:grid-cols-3">
+          <div className="border-b border-white/10 px-5 py-4 sm:border-b-0 sm:border-r sm:px-7"><dt className="text-xs font-bold uppercase tracking-[0.1em] text-white/45">Ports</dt><dd className="font-data mt-1 text-xl font-bold">{station.ports.length}</dd></div>
+          <div className="border-b border-white/10 px-5 py-4 sm:border-b-0 sm:border-r sm:px-7"><dt className="text-xs font-bold uppercase tracking-[0.1em] text-white/45">Minimum session fee</dt><dd className="font-data mt-1 text-xl font-bold">{formatCurrency(station.minimum_session_fee)}</dd></div>
+          <div className="px-5 py-4 sm:px-7"><dt className="text-xs font-bold uppercase tracking-[0.1em] text-white/45">Timezone</dt><dd className="font-data mt-1 text-xl font-bold">{station.timezone}</dd></div>
+        </dl>
+      </section>
 
-      {selectedPort && (
-        <ReservationModal
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          onConfirm={handleReserve}
-          stationName={station.name}
-          portId={selectedPort.port_id}
-          pricePerKwh={station.price_per_kwh}
-          isLoading={reserving}
-        />
+      {activeReservations.length > 0 && (
+        <Alert tone="warning" title="You already have an active reservation">
+          Electra permits one active reservation per driver. <Link to="/driver/sessions" className="font-bold underline">Review your current reservation</Link> before booking another port.
+        </Alert>
       )}
+
+      <section className="surface overflow-hidden">
+        <div className="border-b border-[var(--line)] p-5 sm:p-6"><SectionHeader title="Charging ports" description="Warnings stay visible so you can make an informed manual choice." /></div>
+        {station.ports.length === 0 ? (
+          <EmptyState title="No ports at this station" description="The operator has not published any active charging ports here." icon={<PlugZap size={22} />} />
+        ) : (
+          <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-3">
+            {station.ports.map((port) => {
+              const isAvailable = port.status === 'Available' && port.is_active && !port.is_pending_maintenance;
+              const hasWarning = port.has_health_warning || port.has_blocked_warning;
+              return (
+                <article key={port.port_id} className={`rounded-[var(--radius-md)] border p-4 ${isAvailable ? 'border-[var(--teal)]/30 bg-[#fbfdfc]' : 'border-[var(--line)] bg-[var(--paper-muted)]'}`}>
+                  <div className="flex items-start justify-between gap-3"><div><h3 className="font-display text-lg font-bold">{port.connector_type}</h3><p className="mt-0.5 text-sm text-[var(--steel)]">{port.charger_type}</p></div><Badge tone={statusTone(port.status)}>{port.status}</Badge></div>
+                  <p className="font-data mt-4 truncate rounded-md bg-white px-2.5 py-2 text-xs text-[var(--steel-dark)]" title={port.qr_code}>QR {port.qr_code}</p>
+                  {hasWarning && <div className="mt-3 flex gap-2 rounded-lg bg-[var(--amber-soft)] p-2.5 text-xs font-semibold text-[#6f500c]"><ShieldAlert size={16} className="shrink-0" /><span>{port.has_health_warning ? 'Health issue reported' : 'Blocked bay reported'}. This port remains a manual option.</span></div>}
+                  <Button className="mt-4 w-full" variant={isAvailable ? 'primary' : 'secondary'} disabled={!isAvailable || activeReservations.length > 0} icon={<WalletCards size={16} />} onClick={() => openReservation(port)}>{isAvailable ? 'Reserve port' : 'Unavailable'}</Button>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <ReservationModal
+        open={Boolean(selectedPort)}
+        onClose={() => setSelectedPort(null)}
+        onConfirm={() => void handleReserve()}
+        stationName={station.name}
+        port={selectedPort}
+        pricePerKwh={station.price_per_kwh}
+        vehicles={compatibleVehicles}
+        selectedVehicleId={selectedVehicleId}
+        onVehicleChange={setSelectedVehicleId}
+        walletBalance={user?.wallet_balance ?? 0}
+        isLoading={isReserving}
+      />
     </div>
   );
-};
+}
