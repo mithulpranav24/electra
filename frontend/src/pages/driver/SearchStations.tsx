@@ -45,7 +45,7 @@ export const SearchStations: React.FC = () => {
       const { data } = await api.post('/search/stations', {
         lat: userLat,
         lng: userLng,
-        radius_km: 10000, // Massive radius to show all stations
+        radius_km: 500, // Maximum allowed by backend schema
         connector_type: connectorType || null,
         min_power_kw: isFastCharging ? 50 : null,
       });
