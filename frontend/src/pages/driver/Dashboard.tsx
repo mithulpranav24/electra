@@ -44,11 +44,11 @@ const Dashboard = () => {
 
         <div className="skeuo-panel p-5 flex flex-col gap-2">
           <div className="flex justify-between items-center text-skeuo-text-muted mb-2">
-            <span className="text-sm font-semibold">Nearest Station</span>
-            <Navigation size={18} className="text-orange-500" />
+            <span className="text-sm font-semibold">Unpaid Invoices</span>
+            <Wallet size={18} className="text-orange-500" />
           </div>
-          <p className="text-xl font-bold truncate">Downtown Hub</p>
-          <p className="text-xs text-skeuo-text-muted">2.4 km away • 4 ports available</p>
+          <p className="text-xl font-bold truncate">{data?.unpaid_invoices || '0'}</p>
+          <p className="text-xs text-skeuo-text-muted">Awaiting payment</p>
         </div>
 
         <div className="skeuo-panel p-5 flex flex-col gap-2">
@@ -89,22 +89,7 @@ const Dashboard = () => {
               <div className="text-center py-4 text-skeuo-text-muted">No recent activity</div>
             )}
 
-            {/* Placeholder for empty state if needed, using hardcoded for feature-dense view */}
-            <div className="bg-skeuo-base shadow-skeuo-pressed-sm rounded-xl p-4 border border-white/20 flex items-center justify-between">
-               <div className="flex gap-4 items-center">
-                  <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-600 flex items-center justify-center shadow-inner">
-                    <Clock size={20} />
-                  </div>
-                  <div>
-                    <p className="font-semibold">Reservation Expired</p>
-                    <p className="text-xs text-skeuo-text-muted">Aug 4, 09:00</p>
-                  </div>
-               </div>
-               <div className="text-right">
-                  <p className="font-bold text-red-500">Penalty</p>
-                  <p className="text-xs text-red-500 font-semibold">+1 Point</p>
-               </div>
-            </div>
+
           </div>
         </div>
 
@@ -115,10 +100,7 @@ const Dashboard = () => {
             <Zap size={20} />
             <span>Find a Station</span>
           </button>
-          <button onClick={() => navigate('/driver/search')} className="skeuo-btn w-full justify-start py-4">
-            <Navigation size={20} />
-            <span>View Map</span>
-          </button>
+
           <button onClick={() => navigate('/driver/wallet')} className="skeuo-btn w-full justify-start py-4">
             <Wallet size={20} />
             <span>Add Funds</span>

@@ -72,7 +72,10 @@ export const authService = {
 
 export const vehicleService = {
   getVehicles: async (): Promise<Vehicle[]> => {
-    const { data } = await api.get('/vehicles');
+    // Use cache buster to prevent browser from returning stale data after setting default
+    const { data } = await api.get('/vehicles', {
+      params: { _t: new Date().getTime() }
+    });
     return data;
   },
   

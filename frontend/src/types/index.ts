@@ -10,7 +10,8 @@ export interface User {
 }
 
 export interface Vehicle {
-  id: string;
+  id?: string;
+  vehicle_id: string;
   user_id: string;
   make: string;
   model: string;

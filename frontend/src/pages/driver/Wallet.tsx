@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { CreditCard, Wallet as WalletIcon, Clock, Plus } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface Transaction {
   transaction_id: string;
@@ -22,6 +23,7 @@ const Wallet: React.FC = () => {
   const [topupAmount, setTopupAmount] = useState<string>('500');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const { fetchUser } = useAuth();
 
   const fetchData = async () => {
     try {
@@ -50,7 +52,8 @@ const Wallet: React.FC = () => {
     setError('');
     try {
       await api.post('/wallet/topup', { amount: parseFloat(topupAmount) });
-      fetchData(); // Refresh data
+      await fetchData(); // Refresh data
+      await fetchUser(); // Refresh AuthContext to update sidebar balance
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to top up wallet');
     }
