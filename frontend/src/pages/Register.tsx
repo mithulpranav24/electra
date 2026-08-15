@@ -99,27 +99,7 @@ const Register: React.FC = () => {
             </div>
           </div>
 
-          <div className="mt-4 p-5 skeuo-panel bg-white/40 dark:bg-black/20 border-dashed border-2 border-skeuo-accent/30 rounded-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 bg-skeuo-accent text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg">
-              MOCK PAYMENT GATEWAY
-            </div>
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-              <CreditCard size={16} className="text-skeuo-accent" />
-              Payment Method (Required for Escrow)
-            </h3>
-            <p className="text-xs text-skeuo-text-muted mb-4">
-              To guarantee recovery of penalties and enable reservations, a valid card is required. 
-              <br/>(A default card will be automatically added to initialize your wallet).
-            </p>
-            <div className="skeuo-text-field-group">
-              <input
-                type="text"
-                disabled
-                className="skeuo-input opacity-70 cursor-not-allowed text-center tracking-widest font-mono"
-                placeholder="XXXX XXXX XXXX 4242"
-              />
-            </div>
-          </div>
+
 
           <button type="submit" className="skeuo-btn skeuo-btn-primary mt-4">
             <span>Complete Registration</span>
