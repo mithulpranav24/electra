@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarDays, KeyRound, Save, ShieldAlert, UserRound } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/auth-context';
 import { authService } from '../../services/api';
 import { formatDate } from '../../lib/format';
 import { getErrorMessage } from '../../lib/errors';

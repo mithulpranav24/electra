@@ -1,21 +1,23 @@
-import type { ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Zap } from 'lucide-react';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/auth-context';
 import type { UserRole } from './types';
 import { ToastProvider } from './ui/ToastProvider';
 import { AppShell } from './components/AppShell';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import DriverDashboard from './pages/driver/Dashboard';
-import Vehicles from './pages/driver/Vehicles';
-import Profile from './pages/driver/Profile';
-import Wallet from './pages/driver/Wallet';
-import { SearchStations } from './pages/driver/SearchStations';
-import { StationDetails } from './pages/driver/StationDetails';
-import Sessions from './pages/driver/Sessions';
-import AdminDashboard from './pages/admin/Dashboard';
-import OperatorDashboard from './pages/operator/Dashboard';
+
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const DriverDashboard = lazy(() => import('./pages/driver/Dashboard'));
+const Vehicles = lazy(() => import('./pages/driver/Vehicles'));
+const Profile = lazy(() => import('./pages/driver/Profile'));
+const Wallet = lazy(() => import('./pages/driver/Wallet'));
+const SearchStations = lazy(async () => ({ default: (await import('./pages/driver/SearchStations')).SearchStations }));
+const StationDetails = lazy(async () => ({ default: (await import('./pages/driver/StationDetails')).StationDetails }));
+const Sessions = lazy(() => import('./pages/driver/Sessions'));
+const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
+const OperatorDashboard = lazy(() => import('./pages/operator/Dashboard'));
 
 function GlobalLoader() {
   return (
@@ -57,6 +59,7 @@ export default function App() {
     <AuthProvider>
       <ToastProvider>
         <BrowserRouter>
+          <Suspense fallback={<GlobalLoader />}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
@@ -88,6 +91,7 @@ export default function App() {
             <Route path="/" element={<RootRouter />} />
             <Route path="*" element={<RootRouter />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </ToastProvider>
     </AuthProvider>

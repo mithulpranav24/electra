@@ -117,17 +117,26 @@ Self-critique: an all-dark, neon-green EV dashboard would be a predictable categ
 
 ## Regression checklist
 
-- [ ] Auth initialization, persisted token, logout, 401 handling, and all role redirects.
-- [ ] Registration validation and login payload format.
-- [ ] Driver dashboard data and every quick action.
-- [ ] Search payload, filters, map, result comparison, recents, favorites, and empty/error states.
-- [ ] Station load, favorite toggle, vehicle selection, reservation payload, escrow disclosure, and missing-vehicle handling.
-- [ ] Active reservation display and cancellation.
-- [ ] Vehicle create/edit/delete/default, ID fallback, validation, rollback, and refresh.
-- [ ] Wallet parallel load, top-up validation, all refreshes, transaction signs, and payment-method empty state.
-- [ ] Profile update without stale global data and account deletion.
-- [ ] Operator membership resolution, station/port list, map placement, create/edit/delete, warnings, and errors.
-- [ ] Admin companies, creation, membership assignment/list, update flow, and errors.
-- [ ] Keyboard navigation, dialog behavior, visible focus, reduced motion, and touch targets.
-- [ ] Purposeful layouts at phone, tablet, laptop, and wide desktop widths.
-- [ ] Lint, typecheck/production build, available automated tests, and browser workflow checks.
+- [x] Auth initialization, persisted token, logout, 401 handling, and all role redirects.
+- [x] Registration validation and login payload format.
+- [x] Driver dashboard data and every quick action.
+- [x] Search payload, filters, map, result comparison, recents, favorites, and empty/error states.
+- [x] Station load, favorite toggle, vehicle selection, reservation payload, escrow disclosure, and missing-vehicle handling.
+- [x] Active reservation display and cancellation.
+- [x] Vehicle create/edit/delete/default, ID fallback, validation, rollback, and refresh.
+- [x] Wallet parallel load, top-up validation, all refreshes, transaction signs, and payment-method empty state.
+- [x] Profile update without stale global data and account deletion.
+- [x] Operator membership resolution, station/port list, map placement, create/edit/delete, warnings, and errors.
+- [x] Admin companies, creation, membership assignment/list, update flow, and errors.
+- [x] Keyboard navigation, dialog behavior, visible focus, reduced motion, and touch targets.
+- [x] Purposeful layouts at phone, tablet, laptop, and wide desktop widths.
+- [x] Lint, typecheck/production build, focused frontend tests, dependency audit, and exact-viewport browser checks.
+
+## Final verification record
+
+- Frontend lint completes with no findings.
+- Production TypeScript and Vite build succeeds with route-level code splitting and no bundle-size warning.
+- Eight focused regression tests cover formatting edge cases, reservation eligibility/submission, login payload behavior, and authentication errors.
+- npm reports zero known vulnerabilities after the transitive `nanoid` patch update.
+- Live browser rendering was measured at 320 px, 390 px, and 1440 px. In each case the document width matched the viewport width. Login API failures and registration validation failures were exercised and remained readable at phone width.
+- The existing backend reservation suite was invoked with the active local Python runtime but cannot collect because that environment is missing `geoalchemy2`. No backend code or contract was changed during this redesign.

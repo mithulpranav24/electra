@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, BatteryCharging, Car, Clock3, History, MapPinned, ReceiptText, Wallet, Zap } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/auth-context';
 import { authService, reservationService, vehicleService } from '../../services/api';
 import type { DriverDashboardData, Reservation, Vehicle } from '../../types';
 import { formatCurrency, formatDateTime, shortId } from '../../lib/format';
 import { getErrorMessage } from '../../lib/errors';
 import { Alert, EmptyState, ErrorState, Skeleton } from '../../ui/Feedback';
-import { Badge, statusTone } from '../../ui/Badge';
+import { Badge } from '../../ui/Badge';
+import { statusTone } from '../../lib/status';
 import { Button } from '../../ui/Button';
 import { PageHeader, SectionHeader } from '../../ui/Page';
 

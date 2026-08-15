@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth-context';
 import { authService } from '../services/api';
 import { getErrorMessage } from '../lib/errors';
 import { AuthLayout } from '../components/AuthLayout';
@@ -44,7 +44,7 @@ export default function Login() {
 
   return (
     <AuthLayout mode="login">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
+      <form onSubmit={handleSubmit} className="flex min-w-0 flex-col gap-5" noValidate>
         {state?.registered && <Alert tone="success" title="Account created">Sign in with the email and password you just registered.</Alert>}
         {error && <Alert tone="error" title="Couldn’t sign you in">{error}</Alert>}
 
@@ -52,7 +52,7 @@ export default function Login() {
           {({ id, describedBy, invalid }) => (
             <div className="relative">
               <Mail size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
-              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control pl-11" type="email" autoComplete="email" inputMode="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required autoFocus />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control field-control-leading" type="email" autoComplete="email" inputMode="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required autoFocus />
             </div>
           )}
         </Field>
@@ -61,7 +61,7 @@ export default function Login() {
           {({ id, describedBy, invalid }) => (
             <div className="relative">
               <LockKeyhole size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" aria-hidden="true" />
-              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control px-11" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" required />
+              <input id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control field-control-both" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" required />
               <IconButton label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-1 top-1/2 size-9 -translate-y-1/2 border-0 bg-transparent" onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</IconButton>
             </div>
           )}

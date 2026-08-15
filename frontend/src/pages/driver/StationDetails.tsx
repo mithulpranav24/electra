@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Clock3, Heart, MapPin, PlugZap, ShieldAlert, WalletCards, Zap } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/auth-context';
 import { favoriteService, reservationService, searchService, vehicleService } from '../../services/api';
 import type { ChargingPort, Reservation, Station, Vehicle } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency, normalizeConnector, vehicleId } from '../../lib/format';
 import { ReservationModal } from '../../components/ReservationModal';
 import { Alert, EmptyState, ErrorState, LoadingState } from '../../ui/Feedback';
-import { Badge, statusTone } from '../../ui/Badge';
+import { Badge } from '../../ui/Badge';
+import { statusTone } from '../../lib/status';
 import { Button, IconButton } from '../../ui/Button';
 import { SectionHeader } from '../../ui/Page';
 import { useToast } from '../../ui/ToastContext';
