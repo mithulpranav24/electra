@@ -31,11 +31,11 @@ const VehicleFormModal: React.FC<VehicleFormModalProps> = ({ vehicle, onClose, o
   useEffect(() => {
     if (vehicle) {
       setFormData({
-        make: vehicle.make,
-        model: vehicle.model,
+        make: vehicle.make ?? '',
+        model: vehicle.model ?? '',
         license_plate: vehicle.license_plate,
         battery_capacity_kwh: vehicle.battery_capacity_kwh,
-        connector_type: vehicle.connector_type
+        connector_type: vehicle.connector_type === 'Type 2' ? 'Type2' : vehicle.connector_type as 'Type2' | 'CCS2' | 'CHAdeMO'
       });
     }
   }, [vehicle]);
@@ -55,7 +55,7 @@ const VehicleFormModal: React.FC<VehicleFormModalProps> = ({ vehicle, onClose, o
 
     try {
       if (isEditing && vehicle) {
-        await vehicleService.updateVehicle(vehicle.id, formData);
+        await vehicleService.updateVehicle(vehicle.vehicle_id || vehicle.id || '', formData);
       } else {
         await vehicleService.createVehicle(formData);
       }

@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { api, searchService, favoriteService } from '../../services/api';
-import { Search, MapPin, Zap, Filter, History, Heart } from 'lucide-react';
+import { MapPin, Zap, Filter, History, Heart } from 'lucide-react';
 
 // Fix Leaflet default icon issue in React
 delete (L.Icon.Default.prototype as any)._getIconUrl;

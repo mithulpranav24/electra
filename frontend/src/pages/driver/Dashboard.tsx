@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Clock, Navigation, BatteryCharging, Zap, Wallet } from 'lucide-react';
+import { Clock, BatteryCharging, Zap, Wallet } from 'lucide-react';
 import { authService } from '../../services/api';
 
 const Dashboard = () => {
