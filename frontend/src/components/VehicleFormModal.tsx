@@ -20,7 +20,7 @@ const emptyForm: VehiclePayload = {
   model: '',
   license_plate: '',
   battery_capacity_kwh: 50,
-  connector_type: 'Type2',
+  connector_type: 'Type 2',
 };
 
 export default function VehicleFormModal({ open, vehicle, onClose, onSuccess }: VehicleFormModalProps) {
@@ -37,7 +37,7 @@ export default function VehicleFormModal({ open, vehicle, onClose, onSuccess }: 
       model: vehicle.model ?? '',
       license_plate: vehicle.license_plate,
       battery_capacity_kwh: vehicle.battery_capacity_kwh,
-      connector_type: (vehicle.connector_type === 'Type 2' ? 'Type2' : vehicle.connector_type) as ConnectorType,
+      connector_type: (vehicle.connector_type === 'Type2' ? 'Type 2' : vehicle.connector_type) as ConnectorType,
     } : emptyForm);
   }, [open, vehicle]);
 
@@ -91,7 +91,7 @@ export default function VehicleFormModal({ open, vehicle, onClose, onSuccess }: 
           <Field label="Connector">
             {({ id, describedBy, invalid }) => (
               <select id={id} aria-describedby={describedBy} aria-invalid={invalid} className="field-control" value={formData.connector_type} onChange={(event) => setField('connector_type', event.target.value as ConnectorType)} required>
-                <option value="Type2">Type 2</option>
+                <option value="Type 2">Type 2</option>
                 <option value="CCS2">CCS 2</option>
                 <option value="CHAdeMO">CHAdeMO</option>
               </select>
