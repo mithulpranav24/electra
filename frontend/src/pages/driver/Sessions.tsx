@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { CalendarClock, Clock3, History, MapPinned, XCircle } from 'lucide-react';
-import { reservationService } from '../../services/api';
-import type { Reservation } from '../../types';
+import { reservationService, waitlistService } from '../../services/api';
+import type { Reservation, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency, formatDateTime, shortId } from '../../lib/format';
+import { WaitlistStatusCard } from '../../components/WaitlistStatusCard';
 import { Badge } from '../../ui/Badge';
 import { statusTone } from '../../lib/status';
 import { Button } from '../../ui/Button';
@@ -22,17 +23,26 @@ function arrivalLabel(expiresAt: string) {
 
 export function Sessions() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [waitlistStatus, setWaitlistStatus] = useState<WaitlistStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [cancelling, setCancelling] = useState<Reservation | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isLeavingWaitlist, setIsLeavingWaitlist] = useState(false);
+  const [isConfirmingOffer, setIsConfirmingOffer] = useState(false);
   const { pushToast } = useToast();
+  const navigate = useNavigate();
 
   const loadReservations = useCallback(async () => {
     setError('');
     setIsLoading(true);
     try {
-      setReservations(await reservationService.getActive());
+      const [active, waitlist] = await Promise.all([
+        reservationService.getActive(),
+        waitlistService.getStatus().catch(() => null),
+      ]);
+      setReservations(active);
+      setWaitlistStatus(waitlist);
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Active reservations could not be loaded.'));
     } finally {
@@ -41,6 +51,44 @@ export function Sessions() {
   }, []);
 
   useEffect(() => { void loadReservations(); }, [loadReservations]);
+
+  const activeWaitlistId = waitlistStatus?.waitlist_id ?? null;
+  useEffect(() => {
+    if (!activeWaitlistId) return;
+    const interval = setInterval(() => {
+      waitlistService.getStatus().then(setWaitlistStatus).catch(() => {});
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [activeWaitlistId]);
+
+  const handleLeaveWaitlist = async () => {
+    setIsLeavingWaitlist(true);
+    try {
+      await waitlistService.leave();
+      setWaitlistStatus(null);
+      pushToast({ title: 'Left the waitlist', tone: 'success' });
+    } catch (leaveError) {
+      pushToast({ title: 'Couldn’t leave the waitlist', message: getErrorMessage(leaveError, 'Try again.'), tone: 'error' });
+    } finally {
+      setIsLeavingWaitlist(false);
+    }
+  };
+
+  const handleConfirmOffer = async () => {
+    if (!waitlistStatus) return;
+    setIsConfirmingOffer(true);
+    try {
+      await waitlistService.confirmOffer(waitlistStatus.waitlist_id);
+      setWaitlistStatus(null);
+      pushToast({ title: 'Reservation confirmed', message: 'Your ₹1,000 escrow is held. Arrive and plug in within 15 minutes.', tone: 'success' });
+      await loadReservations();
+      navigate('/driver/sessions');
+    } catch (confirmError) {
+      pushToast({ title: 'Couldn’t confirm the offer', message: getErrorMessage(confirmError, 'The offer may have expired.'), tone: 'error' });
+    } finally {
+      setIsConfirmingOffer(false);
+    }
+  };
 
   const handleCancel = async () => {
     if (!cancelling) return;
@@ -60,6 +108,16 @@ export function Sessions() {
   return (
     <div className="flex flex-col gap-7 enter-up">
       <PageHeader eyebrow="Activity" title="Reservations & charging" description="Time-sensitive reservations appear first, followed by your charging history when available." actions={<Link to="/driver/search"><Button variant="primary" icon={<MapPinned size={18} />}>Find charging</Button></Link>} />
+
+      {waitlistStatus && (
+        <WaitlistStatusCard
+          status={waitlistStatus}
+          onConfirm={() => void handleConfirmOffer()}
+          onLeave={() => void handleLeaveWaitlist()}
+          isConfirming={isConfirmingOffer}
+          isLeaving={isLeavingWaitlist}
+        />
+      )}
 
       <section className="surface overflow-hidden">
         <div className="border-b border-[var(--line)] p-5 sm:p-6"><SectionHeader title="Active reservations" description="You can hold one active reservation across all vehicles." /></div>

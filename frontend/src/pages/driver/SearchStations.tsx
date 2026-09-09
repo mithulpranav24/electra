@@ -10,6 +10,7 @@ import { favoriteService, searchService } from '../../services/api';
 import type { Favorite, Station } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency } from '../../lib/format';
+import { MOCK_USER_LAT, MOCK_USER_LNG } from '../../lib/geo';
 import { Badge } from '../../ui/Badge';
 import { Button } from '../../ui/Button';
 import { EmptyState, ErrorState, LoadingState } from '../../ui/Feedback';
@@ -17,8 +18,8 @@ import { Field } from '../../ui/Field';
 import { PageHeader, SectionHeader } from '../../ui/Page';
 
 const stationIcon = L.icon({ iconUrl: icon, shadowUrl: iconShadow, iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -35] });
-const userLat = 12.9716;
-const userLng = 77.5946;
+const userLat = MOCK_USER_LAT;
+const userLng = MOCK_USER_LNG;
 
 function availablePorts(station: Station) {
   return station.ports.filter((port) => port.is_active && port.status === 'Available').length;
