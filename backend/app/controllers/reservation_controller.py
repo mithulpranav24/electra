@@ -45,7 +45,7 @@ def clean_expired_reservations(db: Session):
             ChargingPort.port_id == res.port_id
         ).first()
         if port:
-            candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type)
+            candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
             WaitlistService.apply_promotion_or_release(db, port, candidate)
 
         # SLA timeout: escrow is forfeited (no refund) per DD-24
@@ -226,7 +226,10 @@ def cancel_reservation(
             raise HTTPException(status_code=400, detail="Only confirmed reservations can be cancelled")
 
         # Step 2: Acquire locks in correct order: STATIONS -> CHARGING_PORTS -> VEHICLES -> USERS -> RESERVATIONS
-        station = db.query(Station).join(ChargingPort).with_for_update().filter(
+        # STATIONS is a read-only validation lock here (no station-wide state changes), so it
+        # must be FOR SHARE (Architecture.md 3.5) rather than the exclusive default, or every
+        # other concurrent reservation/waitlist request at this station would be blocked.
+        station = db.query(Station).join(ChargingPort).with_for_update(read=True).filter(
             ChargingPort.port_id == reservation_read.port_id
         ).first()
 
@@ -246,7 +249,7 @@ def cancel_reservation(
         # Tier 4 RESERVATIONS lock below, to respect the global lock hierarchy.
         waitlist_candidate = None
         if port:
-            waitlist_candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type)
+            waitlist_candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
 
         reservation = db.query(Reservation).with_for_update().filter(
             Reservation.reservation_id == reservation_id,

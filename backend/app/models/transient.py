@@ -23,6 +23,12 @@ class FaultExemptionClaim(Base):
     port_id = Column(UUID(as_uuid=True), ForeignKey("charging_ports.port_id", ondelete="CASCADE"), nullable=False)
     claimed_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
 
+class WaitlistRejection(Base):
+    __tablename__ = 'waitlist_rejections'
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
+    port_id = Column(UUID(as_uuid=True), ForeignKey("charging_ports.port_id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
+
 class SearchHistory(Base):
     __tablename__ = 'search_history'
     search_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

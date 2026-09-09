@@ -3,13 +3,14 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from app.models.audit import AuditLog
 from app.models.reservation import Reservation
+from app.models.session import ChargingSession
 from app.models.station import ChargingPort, Station
-from app.models.transient import Waitlist
+from app.models.transient import Waitlist, WaitlistRejection
 from app.models.user import User
 from app.models.vehicle import Vehicle
 
@@ -27,38 +28,110 @@ class WaitlistService:
     # cancellation, and the background waitlist-offer-expiry worker.
     # ------------------------------------------------------------------
     @staticmethod
-    def find_candidate_waitlist_entry(db: Session, station_id, connector_type) -> Optional[Waitlist]:
-        """Locks (FOR UPDATE) and returns the earliest eligible waitlist entry for a
-        freed port at this station/connector, or None if the queue is empty.
-        Callers must already hold the STATIONS -> CHARGING_PORTS -> VEHICLES -> USERS
-        locks per the global lock hierarchy before calling this, so the WAITLIST
-        (tier 3.5) lock is acquired strictly before any RESERVATIONS (tier 4) lock.
+    def find_candidate_waitlist_entry(db: Session, station_id, connector_type, port_id=None) -> Optional[Waitlist]:
+        """Single monolithic query (Architecture.md 3.3.3): optimistically (no row
+        locks) reads USERS, VEHICLES, CHARGING_SESSIONS, RESERVATIONS, and
+        WAITLIST_REJECTIONS to mathematically filter out banned, soft-deleted,
+        busy, or previously-rejected drivers, then applies FOR UPDATE LIMIT 1
+        ONLY to the winning WAITLIST row (no SKIP LOCKED, to preserve strict FIFO).
+        Callers must already hold the STATIONS -> CHARGING_PORTS -> VEHICLES ->
+        USERS locks per the global lock hierarchy before calling this, so the
+        WAITLIST (tier 3.5) lock is acquired strictly before any RESERVATIONS
+        (tier 4) lock.
         """
         # Flush first so a prior promotion/deletion earlier in the same transaction
         # (e.g. another port at this station being processed in the same batch job)
         # is visible to this SELECT before the next candidate is picked.
         db.flush()
-        return (
-            db.query(Waitlist)
+
+        has_active_reservation = (
+            db.query(Reservation.reservation_id)
+            .filter(Reservation.user_id == Waitlist.user_id, Reservation.status.in_(["Confirmed", "Active"]))
+            .correlate(Waitlist)
+            .exists()
+        )
+        has_active_session = (
+            db.query(ChargingSession.session_id)
+            .join(Reservation, ChargingSession.reservation_id == Reservation.reservation_id)
+            .filter(Reservation.vehicle_id == Waitlist.vehicle_id, ChargingSession.end_time.is_(None))
+            .correlate(Waitlist)
+            .exists()
+        )
+
+        query = (
+            db.query(Waitlist.waitlist_id)
             .join(Vehicle, Waitlist.vehicle_id == Vehicle.vehicle_id)
+            .join(User, Waitlist.user_id == User.user_id)
             .filter(
                 Waitlist.station_id == station_id,
                 Waitlist.offered_port_id.is_(None),
                 Vehicle.connector_type == connector_type,
+                Vehicle.is_active.is_(True),
+                User.is_active.is_(True),
+                or_(User.banned_until.is_(None), User.banned_until <= func.current_timestamp()),
+                ~has_active_reservation,
+                ~has_active_session,
             )
-            .order_by(Waitlist.joined_at.asc())
+        )
+        if port_id is not None:
+            has_rejected_this_port = (
+                db.query(WaitlistRejection.user_id)
+                .filter(WaitlistRejection.user_id == Waitlist.user_id, WaitlistRejection.port_id == port_id)
+                .correlate(Waitlist)
+                .exists()
+            )
+            query = query.filter(~has_rejected_this_port)
+
+        eligible_id = query.order_by(Waitlist.joined_at.asc()).limit(1).scalar_subquery()
+
+        return (
+            db.query(Waitlist)
+            .filter(Waitlist.waitlist_id == eligible_id)
             .with_for_update(of=Waitlist)
             .first()
         )
+
+    @staticmethod
+    def _station_closing_too_soon(db: Session, port: ChargingPort) -> bool:
+        """Architecture.md 3.3.3: never offer a port if CURRENT_TIMESTAMP + 30
+        minutes would exceed the station's closing time (insufficient time left
+        to arrive and check in)."""
+        station = db.query(Station).filter(Station.station_id == port.station_id).first()
+        if not station or station.current_shift_end_utc is None:
+            return False
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        return now + timedelta(minutes=30) > station.current_shift_end_utc
+
+    @staticmethod
+    def _is_last_operational_port(db: Session, port: ChargingPort) -> bool:
+        other_operational = (
+            db.query(ChargingPort)
+            .filter(
+                ChargingPort.station_id == port.station_id,
+                ChargingPort.connector_type == port.connector_type,
+                ChargingPort.port_id != port.port_id,
+                ChargingPort.is_active.is_(True),
+                ChargingPort.status.notin_(["Offline", "Maintenance"]),
+            )
+            .count()
+        )
+        return other_operational == 0
 
     @staticmethod
     def apply_promotion_or_release(db: Session, port: ChargingPort, candidate: Optional[Waitlist]) -> Optional[Waitlist]:
         """Given a port that just became free and an already-locked candidate
         waitlist entry (or None), either offers the port to the candidate or
         releases it back to Available. A port carrying a health/blocked warning
-        skips promotion entirely (Arch 3.3.3) and stays a manual walk-in option.
+        skips promotion entirely (Arch 3.3.3) and stays a manual walk-in option -
+        UNLESS it is the last operational port at the station for its connector
+        type, in which case it transitions to Maintenance instead, so the queue
+        does not trap indefinitely on a port nobody can promote into.
         """
         if port.has_health_warning or port.has_blocked_warning:
+            port.status = "Maintenance" if WaitlistService._is_last_operational_port(db, port) else "Available"
+            return None
+
+        if WaitlistService._station_closing_too_soon(db, port):
             port.status = "Available"
             return None
 
@@ -176,7 +249,10 @@ class WaitlistService:
             raise HTTPException(status_code=404, detail="You do not have an active waitlist entry")
 
         # Lock order: STATIONS -> CHARGING_PORTS (if an offer is held) -> VEHICLES -> USERS -> WAITLIST
-        db.query(Station).with_for_update().filter(Station.station_id == entry_read.station_id).first()
+        # STATIONS is a read-only validation lock here (no station-wide state changes), so it
+        # must be FOR SHARE (Architecture.md 3.5) rather than the exclusive default, or every
+        # other concurrent reservation/waitlist request at this station would be blocked.
+        db.query(Station).with_for_update(read=True).filter(Station.station_id == entry_read.station_id).first()
 
         port = None
         if entry_read.offered_port_id:
@@ -193,7 +269,7 @@ class WaitlistService:
         db.delete(entry)
 
         if port is not None and port.status == "Pending Waitlist":
-            candidate = WaitlistService.find_candidate_waitlist_entry(db, entry.station_id, port.connector_type)
+            candidate = WaitlistService.find_candidate_waitlist_entry(db, entry.station_id, port.connector_type, port.port_id)
             WaitlistService.apply_promotion_or_release(db, port, candidate)
 
         db.add(AuditLog(
@@ -286,23 +362,49 @@ class WaitlistService:
     def expire_stale_offers(db: Session) -> int:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         cutoff = now - timedelta(seconds=OFFER_WINDOW_SECONDS)
-        stale_entries = db.query(Waitlist).filter(
-            Waitlist.offered_port_id.isnot(None),
-            Waitlist.offered_at <= cutoff,
-        ).all()
+
+        # Optimistic read only, per Architecture.md 3.4 - no locks yet. Ordered by the
+        # port each offer holds (ascending PK, per the 3.5 "within a tier, ascending
+        # primary key" rule) so that if two expiries happen to touch related rows,
+        # every worker run and every concurrent process locks them in the same order.
+        stale_ids = [
+            row[0]
+            for row in db.query(Waitlist.waitlist_id)
+            .filter(Waitlist.offered_port_id.isnot(None), Waitlist.offered_at <= cutoff)
+            .order_by(Waitlist.offered_port_id.asc())
+            .all()
+        ]
 
         expired_count = 0
-        for stale in stale_entries:
-            port = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == stale.offered_port_id).first()
-            entry = db.query(Waitlist).with_for_update().filter(Waitlist.waitlist_id == stale.waitlist_id).first()
+        for waitlist_id in stale_ids:
+            # Each stale offer is processed as its own atomic transaction (commit or
+            # rollback per iteration) rather than one batch commit at the end, so a
+            # lock wait or failure on one port can never block or deadlock another.
+            optimistic = db.query(Waitlist).filter(Waitlist.waitlist_id == waitlist_id).first()
+            if not optimistic or not optimistic.offered_port_id:
+                continue
+
+            # Tier 1: STATIONS FOR SHARE (read-only validation, no station-wide change)
+            db.query(Station).with_for_update(read=True).join(ChargingPort).filter(
+                ChargingPort.port_id == optimistic.offered_port_id
+            ).first()
+            # Tier 2: CHARGING_PORTS
+            port = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == optimistic.offered_port_id).first()
+            # Tier 3: USERS
+            db.query(User).with_for_update().filter(User.user_id == optimistic.user_id).first()
+            # Tier 3.5: WAITLIST
+            entry = db.query(Waitlist).with_for_update().filter(Waitlist.waitlist_id == waitlist_id).first()
+
             if not entry or not port:
+                db.rollback()
                 continue
             # Re-check under lock: another request may have confirmed/left in the meantime.
             if entry.offered_at is None or entry.offered_at > cutoff:
+                db.rollback()
                 continue
 
             db.delete(entry)
-            candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type)
+            candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
             WaitlistService.apply_promotion_or_release(db, port, candidate)
 
             db.add(AuditLog(
@@ -313,8 +415,7 @@ class WaitlistService:
                 details={"port_id": str(port.port_id)},
                 ip_address="system",
             ))
+            db.commit()
             expired_count += 1
 
-        if expired_count:
-            db.commit()
         return expired_count

@@ -423,16 +423,21 @@ BEGIN
     INTO v_station_is_active, v_station_minimum_fee, v_station_price_per_kwh, v_station_shift_end
     FROM STATIONS WHERE station_id = p_station_id FOR SHARE;
 
-    -- Tier 2.5: Vehicles (locked before ports so we know the connector type to scope the port lock)
-    SELECT user_id, connector_type, is_active INTO v_vehicle_user_id, v_vehicle_connector_type, v_vehicle_is_active
-    FROM VEHICLES WHERE vehicle_id = p_vehicle_id FOR SHARE;
-
+    -- Optimistic (unlocked) read of the connector type, only to scope the port lock below.
+    -- The global hierarchy is CHARGING_PORTS (Tier 2) -> VEHICLES (Tier 2.5); locking the
+    -- vehicle first would invert that order and risk deadlocking against sp_ConfirmWaitlist
+    -- and cancel_reservation, which both lock ports before vehicles.
+    SELECT connector_type INTO v_vehicle_connector_type FROM VEHICLES WHERE vehicle_id = p_vehicle_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Vehicle not found'; END IF;
 
     -- Tier 2: Charging Ports (lock every compatible port at this station in a stable order)
     PERFORM 1 FROM CHARGING_PORTS
     WHERE station_id = p_station_id AND connector_type = v_vehicle_connector_type
     ORDER BY port_id FOR SHARE;
+
+    -- Tier 2.5: Vehicles (re-validated now, under lock, after the port lock is held)
+    SELECT user_id, connector_type, is_active INTO v_vehicle_user_id, v_vehicle_connector_type, v_vehicle_is_active
+    FROM VEHICLES WHERE vehicle_id = p_vehicle_id FOR SHARE;
 
     -- Tier 3: Users
     SELECT wallet_balance, banned_until, is_active INTO v_user_wallet_balance, v_user_banned_until, v_user_is_active
