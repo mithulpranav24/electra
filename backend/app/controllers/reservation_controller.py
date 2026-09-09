@@ -29,21 +29,52 @@ def clean_expired_reservations(db: Session):
     """
     DD-02: Expire reservations by checking CURRENT_TIMESTAMP against expires_at,
     not by checking created_at age. This correctly handles extended reservations.
+
+    This now also runs autonomously from the Celery `expire-reservations` beat
+    task every minute (in addition to the opportunistic inline calls below), so
+    each expiry MUST be its own atomic, correctly-ordered transaction (Architecture.md
+    3.4.1: STATIONS FOR SHARE -> CHARGING_PORTS FOR UPDATE -> USERS FOR UPDATE ->
+    RESERVATIONS FOR UPDATE) with its own commit, or it will eventually deadlock
+    against sp_ConfirmWaitlist / cancel_reservation, which lock in that same order.
     """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    expired = db.query(Reservation).filter(
-        Reservation.status == "Confirmed",
-        Reservation.expires_at < now
-    ).with_for_update().all()
 
-    for res in expired:
+    # Optimistic read only - no locks yet. Ordered by port_id (ascending PK, the
+    # Tier-2 resource each expiry ultimately locks) so concurrent runs converge
+    # on the same lock acquisition order.
+    expired_ids = [
+        row[0]
+        for row in db.query(Reservation.reservation_id)
+        .filter(Reservation.status == "Confirmed", Reservation.expires_at < now)
+        .order_by(Reservation.port_id.asc())
+        .all()
+    ]
+
+    for reservation_id in expired_ids:
+        optimistic = db.query(Reservation).filter(Reservation.reservation_id == reservation_id).first()
+        if not optimistic or optimistic.status != "Confirmed":
+            continue
+
+        # Tier 1: STATIONS FOR SHARE (read-only validation, of=Station so the join
+        # doesn't also put CHARGING_PORTS under FOR SHARE ahead of its FOR UPDATE below)
+        db.query(Station).join(ChargingPort).with_for_update(read=True, of=Station).filter(
+            ChargingPort.port_id == optimistic.port_id
+        ).first()
+        # Tier 2: CHARGING_PORTS
+        port = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == optimistic.port_id).first()
+        # Tier 3: USERS
+        db.query(User).with_for_update().filter(User.user_id == optimistic.user_id).first()
+        # Tier 4: RESERVATIONS - re-validate under lock (another request may have
+        # cancelled/extended it in the meantime)
+        res = db.query(Reservation).with_for_update().filter(Reservation.reservation_id == reservation_id).first()
+
+        if not res or res.status != "Confirmed" or res.expires_at >= now:
+            db.rollback()
+            continue
+
         res.status = "Cancelled"
         res.cancellation_reason = "SLA Timeout (No Show)"
 
-        # Free port — lock order: CHARGING_PORTS before RESERVATIONS (already locked above)
-        port = db.query(ChargingPort).with_for_update().filter(
-            ChargingPort.port_id == res.port_id
-        ).first()
         if port:
             candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
             WaitlistService.apply_promotion_or_release(db, port, candidate)
@@ -56,8 +87,6 @@ def clean_expired_reservations(db: Session):
             reference_id=res.reservation_id
         )
         db.add(penalty_tx)
-
-    if expired:
         db.commit()
 
 @router.post("", response_model=ReservationResponse)
@@ -229,7 +258,10 @@ def cancel_reservation(
         # STATIONS is a read-only validation lock here (no station-wide state changes), so it
         # must be FOR SHARE (Architecture.md 3.5) rather than the exclusive default, or every
         # other concurrent reservation/waitlist request at this station would be blocked.
-        station = db.query(Station).join(ChargingPort).with_for_update(read=True).filter(
+        # of=Station scopes the FOR SHARE to just the joined Station row - without it, the join
+        # also puts ChargingPort under FOR SHARE, which the very next query below upgrades to
+        # FOR UPDATE (a SHARE -> UPDATE lock upgrade is a known deadlock vector under contention).
+        station = db.query(Station).join(ChargingPort).with_for_update(read=True, of=Station).filter(
             ChargingPort.port_id == reservation_read.port_id
         ).first()
 

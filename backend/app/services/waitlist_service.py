@@ -384,8 +384,11 @@ class WaitlistService:
             if not optimistic or not optimistic.offered_port_id:
                 continue
 
-            # Tier 1: STATIONS FOR SHARE (read-only validation, no station-wide change)
-            db.query(Station).with_for_update(read=True).join(ChargingPort).filter(
+            # Tier 1: STATIONS FOR SHARE (read-only validation, no station-wide change).
+            # of=Station scopes the lock to just Station - otherwise the join also puts
+            # ChargingPort under FOR SHARE, which gets upgraded to FOR UPDATE two lines
+            # down (a SHARE -> UPDATE lock upgrade is a deadlock vector under contention).
+            db.query(Station).with_for_update(read=True, of=Station).join(ChargingPort).filter(
                 ChargingPort.port_id == optimistic.offered_port_id
             ).first()
             # Tier 2: CHARGING_PORTS
