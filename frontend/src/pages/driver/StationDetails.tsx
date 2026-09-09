@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Clock3, Heart, MapPin, PlugZap, ShieldAlert, WalletCards, Zap } from 'lucide-react';
+import { ArrowLeft, Clock3, Heart, ListPlus, MapPin, PlugZap, ShieldAlert, WalletCards, Zap } from 'lucide-react';
 import { useAuth } from '../../context/auth-context';
-import { favoriteService, reservationService, searchService, vehicleService } from '../../services/api';
-import type { ChargingPort, Reservation, Station, Vehicle } from '../../types';
+import { favoriteService, reservationService, searchService, vehicleService, waitlistService } from '../../services/api';
+import type { ChargingPort, Reservation, Station, Vehicle, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency, normalizeConnector, vehicleId } from '../../lib/format';
+import { MOCK_USER_LAT, MOCK_USER_LNG } from '../../lib/geo';
 import { ReservationModal } from '../../components/ReservationModal';
+import { WaitlistJoinModal } from '../../components/WaitlistJoinModal';
+import { WaitlistStatusCard } from '../../components/WaitlistStatusCard';
 import { Alert, EmptyState, ErrorState, LoadingState } from '../../ui/Feedback';
 import { Badge } from '../../ui/Badge';
 import { statusTone } from '../../lib/status';
@@ -18,6 +21,7 @@ interface StationPageData {
   station: Station;
   vehicles: Vehicle[];
   activeReservations: Reservation[];
+  waitlistStatus: WaitlistStatus | null;
 }
 
 export function StationDetails() {
@@ -33,18 +37,24 @@ export function StationDetails() {
   const [selectedPort, setSelectedPort] = useState<ChargingPort | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
   const [isReserving, setIsReserving] = useState(false);
+  const [showWaitlistModal, setShowWaitlistModal] = useState(false);
+  const [waitlistVehicleId, setWaitlistVehicleId] = useState('');
+  const [isJoiningWaitlist, setIsJoiningWaitlist] = useState(false);
+  const [isLeavingWaitlist, setIsLeavingWaitlist] = useState(false);
+  const [isConfirmingOffer, setIsConfirmingOffer] = useState(false);
 
   const loadStation = useCallback(async () => {
     setError('');
     setIsLoading(true);
     try {
-      const [station, vehicles, activeReservations, favorites] = await Promise.all([
+      const [station, vehicles, activeReservations, favorites, waitlistStatus] = await Promise.all([
         searchService.getStation(id),
         vehicleService.getVehicles(),
         reservationService.getActive(),
         favoriteService.getFavorites().catch(() => []),
+        waitlistService.getStatus().catch(() => null),
       ]);
-      setData({ station, vehicles, activeReservations });
+      setData({ station, vehicles, activeReservations, waitlistStatus });
       setIsFavorite(favorites.some((favorite) => favorite.station_id === id));
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Station details could not be loaded.'));
@@ -59,6 +69,64 @@ export function StationDetails() {
     if (!selectedPort || !data) return [];
     return data.vehicles.filter((vehicle) => normalizeConnector(vehicle.connector_type) === normalizeConnector(selectedPort.connector_type));
   }, [data, selectedPort]);
+
+  const vehiclesNeedingWaitlist = useMemo(() => {
+    if (!data) return [];
+    return data.vehicles.filter((vehicle) => {
+      const matchingPorts = data.station.ports.filter((port) => normalizeConnector(port.connector_type) === normalizeConnector(vehicle.connector_type));
+      if (matchingPorts.length === 0) return false;
+      const hasUnwarnedAvailable = matchingPorts.some((port) => port.status === 'Available' && port.is_active && !port.has_health_warning && !port.has_blocked_warning);
+      return !hasUnwarnedAvailable;
+    });
+  }, [data]);
+
+  const openWaitlistModal = () => {
+    const preferred = vehiclesNeedingWaitlist.find((vehicle) => vehicle.is_default) ?? vehiclesNeedingWaitlist[0];
+    setWaitlistVehicleId(preferred ? vehicleId(preferred) : '');
+    setShowWaitlistModal(true);
+  };
+
+  const handleJoinWaitlist = async () => {
+    if (!waitlistVehicleId || !id) return;
+    setIsJoiningWaitlist(true);
+    try {
+      const status = await waitlistService.join({ station_id: id, vehicle_id: waitlistVehicleId, lat: MOCK_USER_LAT, lng: MOCK_USER_LNG });
+      setData((current) => current ? { ...current, waitlistStatus: status } : current);
+      setShowWaitlistModal(false);
+      pushToast({ title: 'Joined the waitlist', message: `You're position ${status.position} in line.`, tone: 'success' });
+    } catch (joinError) {
+      pushToast({ title: 'Couldn’t join the waitlist', message: getErrorMessage(joinError, 'Try again.'), tone: 'error' });
+    } finally {
+      setIsJoiningWaitlist(false);
+    }
+  };
+
+  const handleLeaveWaitlist = async () => {
+    setIsLeavingWaitlist(true);
+    try {
+      await waitlistService.leave();
+      setData((current) => current ? { ...current, waitlistStatus: null } : current);
+      pushToast({ title: 'Left the waitlist', tone: 'success' });
+    } catch (leaveError) {
+      pushToast({ title: 'Couldn’t leave the waitlist', message: getErrorMessage(leaveError, 'Try again.'), tone: 'error' });
+    } finally {
+      setIsLeavingWaitlist(false);
+    }
+  };
+
+  const handleConfirmOffer = async () => {
+    if (!data?.waitlistStatus) return;
+    setIsConfirmingOffer(true);
+    try {
+      await waitlistService.confirmOffer(data.waitlistStatus.waitlist_id);
+      pushToast({ title: 'Reservation confirmed', message: 'Your ₹1,000 escrow is held. Arrive and plug in within 15 minutes.', tone: 'success' });
+      navigate('/driver/sessions');
+    } catch (confirmError) {
+      pushToast({ title: 'Couldn’t confirm the offer', message: getErrorMessage(confirmError, 'The offer may have expired.'), tone: 'error' });
+    } finally {
+      setIsConfirmingOffer(false);
+    }
+  };
 
   const openReservation = (port: ChargingPort) => {
     setSelectedPort(port);
@@ -100,7 +168,7 @@ export function StationDetails() {
   if (isLoading) return <div className="surface"><LoadingState label="Loading station" /></div>;
   if (error || !data) return <ErrorState title="Station unavailable" description={error || 'The station was not found.'} onRetry={() => void loadStation()} />;
 
-  const { station, activeReservations } = data;
+  const { station, activeReservations, waitlistStatus } = data;
   const availableCount = station.ports.filter((port) => port.status === 'Available' && port.is_active).length;
   const hours = station.opening_time_local && station.closing_time_local ? `${station.opening_time_local.slice(0, 5)}–${station.closing_time_local.slice(0, 5)}` : 'Open 24 hours';
 
@@ -131,6 +199,26 @@ export function StationDetails() {
       {activeReservations.length > 0 && (
         <Alert tone="warning" title="You already have an active reservation">
           Electra permits one active reservation per driver. <Link to="/driver/sessions" className="font-bold underline">Review your current reservation</Link> before booking another port.
+        </Alert>
+      )}
+
+      {waitlistStatus && waitlistStatus.station_id === id ? (
+        <WaitlistStatusCard
+          status={waitlistStatus}
+          stationName={station.name}
+          onConfirm={() => void handleConfirmOffer()}
+          onLeave={() => void handleLeaveWaitlist()}
+          isConfirming={isConfirmingOffer}
+          isLeaving={isLeavingWaitlist}
+        />
+      ) : waitlistStatus ? (
+        <Alert tone="info" title="You already have an active waitlist entry">
+          Electra permits one active waitlist entry per driver. <Link to="/driver/sessions" className="font-bold underline">Review your current waitlist status</Link> before joining another queue.
+        </Alert>
+      ) : activeReservations.length === 0 && vehiclesNeedingWaitlist.length > 0 && (
+        <Alert tone="info" title="This station is fully booked for your vehicle">
+          Join the waitlist and Electra will hold a port for you the moment one frees up.
+          <div className="mt-3"><Button variant="primary" size="sm" icon={<ListPlus size={16} />} onClick={openWaitlistModal}>Join waitlist</Button></div>
         </Alert>
       )}
 
@@ -168,6 +256,19 @@ export function StationDetails() {
         onVehicleChange={setSelectedVehicleId}
         walletBalance={user?.wallet_balance ?? 0}
         isLoading={isReserving}
+      />
+
+      <WaitlistJoinModal
+        open={showWaitlistModal}
+        onClose={() => setShowWaitlistModal(false)}
+        onConfirm={() => void handleJoinWaitlist()}
+        stationName={station.name}
+        minimumSessionFee={station.minimum_session_fee}
+        vehicles={vehiclesNeedingWaitlist}
+        selectedVehicleId={waitlistVehicleId}
+        onVehicleChange={setWaitlistVehicleId}
+        walletBalance={user?.wallet_balance ?? 0}
+        isLoading={isJoiningWaitlist}
       />
     </div>
   );

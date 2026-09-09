@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 from typing import List
 from decimal import Decimal
 import uuid
@@ -15,6 +15,7 @@ from app.models.wallet import WalletTransaction
 from app.models.vehicle import Vehicle
 from app.models.audit import AuditLog
 from app.schemas.reservation_schema import ReservationCreate, ReservationResponse
+from app.services.waitlist_service import WaitlistService
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
 
@@ -28,36 +29,55 @@ def clean_expired_reservations(db: Session):
     """
     DD-02: Expire reservations by checking CURRENT_TIMESTAMP against expires_at,
     not by checking created_at age. This correctly handles extended reservations.
+
+    This now also runs autonomously from the Celery `expire-reservations` beat
+    task every minute (in addition to the opportunistic inline calls below), so
+    each expiry MUST be its own atomic, correctly-ordered transaction (Architecture.md
+    3.4.1: STATIONS FOR SHARE -> CHARGING_PORTS FOR UPDATE -> USERS FOR UPDATE ->
+    RESERVATIONS FOR UPDATE) with its own commit, or it will eventually deadlock
+    against sp_ConfirmWaitlist / cancel_reservation, which lock in that same order.
     """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    expired = db.query(Reservation).filter(
-        Reservation.status == "Confirmed",
-        Reservation.expires_at < now
-    ).with_for_update().all()
 
-    for res in expired:
+    # Optimistic read only - no locks yet. Ordered by port_id (ascending PK, the
+    # Tier-2 resource each expiry ultimately locks) so concurrent runs converge
+    # on the same lock acquisition order.
+    expired_ids = [
+        row[0]
+        for row in db.query(Reservation.reservation_id)
+        .filter(Reservation.status == "Confirmed", Reservation.expires_at < now)
+        .order_by(Reservation.port_id.asc())
+        .all()
+    ]
+
+    for reservation_id in expired_ids:
+        optimistic = db.query(Reservation).filter(Reservation.reservation_id == reservation_id).first()
+        if not optimistic or optimistic.status != "Confirmed":
+            continue
+
+        # Tier 1: STATIONS FOR SHARE (read-only validation, of=Station so the join
+        # doesn't also put CHARGING_PORTS under FOR SHARE ahead of its FOR UPDATE below)
+        db.query(Station).join(ChargingPort).with_for_update(read=True, of=Station).filter(
+            ChargingPort.port_id == optimistic.port_id
+        ).first()
+        # Tier 2: CHARGING_PORTS
+        port = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == optimistic.port_id).first()
+        # Tier 3: USERS
+        db.query(User).with_for_update().filter(User.user_id == optimistic.user_id).first()
+        # Tier 4: RESERVATIONS - re-validate under lock (another request may have
+        # cancelled/extended it in the meantime)
+        res = db.query(Reservation).with_for_update().filter(Reservation.reservation_id == reservation_id).first()
+
+        if not res or res.status != "Confirmed" or res.expires_at >= now:
+            db.rollback()
+            continue
+
         res.status = "Cancelled"
         res.cancellation_reason = "SLA Timeout (No Show)"
 
-        # Free port — lock order: CHARGING_PORTS before RESERVATIONS (already locked above)
-        port = db.query(ChargingPort).with_for_update().filter(
-            ChargingPort.port_id == res.port_id
-        ).first()
         if port:
-            from app.models.transient import Waitlist
-            from app.models.vehicle import Vehicle
-            waitlist_entry = db.query(Waitlist).join(Vehicle).filter(
-                Waitlist.station_id == port.station_id,
-                Waitlist.offered_port_id.is_(None),
-                Vehicle.connector_type == port.connector_type
-            ).order_by(Waitlist.joined_at.asc()).first()
-
-            if waitlist_entry:
-                port.status = "Pending Waitlist"
-                waitlist_entry.offered_port_id = port.port_id
-                waitlist_entry.offered_at = func.now()
-            else:
-                port.status = "Available"
+            candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
+            WaitlistService.apply_promotion_or_release(db, port, candidate)
 
         # SLA timeout: escrow is forfeited (no refund) per DD-24
         penalty_tx = WalletTransaction(
@@ -67,8 +87,6 @@ def clean_expired_reservations(db: Session):
             reference_id=res.reservation_id
         )
         db.add(penalty_tx)
-
-    if expired:
         db.commit()
 
 @router.post("", response_model=ReservationResponse)
@@ -237,7 +255,13 @@ def cancel_reservation(
             raise HTTPException(status_code=400, detail="Only confirmed reservations can be cancelled")
 
         # Step 2: Acquire locks in correct order: STATIONS -> CHARGING_PORTS -> VEHICLES -> USERS -> RESERVATIONS
-        station = db.query(Station).join(ChargingPort).with_for_update().filter(
+        # STATIONS is a read-only validation lock here (no station-wide state changes), so it
+        # must be FOR SHARE (Architecture.md 3.5) rather than the exclusive default, or every
+        # other concurrent reservation/waitlist request at this station would be blocked.
+        # of=Station scopes the FOR SHARE to just the joined Station row - without it, the join
+        # also puts ChargingPort under FOR SHARE, which the very next query below upgrades to
+        # FOR UPDATE (a SHARE -> UPDATE lock upgrade is a known deadlock vector under contention).
+        station = db.query(Station).join(ChargingPort).with_for_update(read=True, of=Station).filter(
             ChargingPort.port_id == reservation_read.port_id
         ).first()
 
@@ -253,6 +277,12 @@ def cancel_reservation(
             User.user_id == current_user.user_id
         ).first()
 
+        # Tier 3.5: WAITLIST — lock the promotion candidate (if any) before the
+        # Tier 4 RESERVATIONS lock below, to respect the global lock hierarchy.
+        waitlist_candidate = None
+        if port:
+            waitlist_candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
+
         reservation = db.query(Reservation).with_for_update().filter(
             Reservation.reservation_id == reservation_id,
             Reservation.user_id == current_user.user_id
@@ -263,13 +293,12 @@ def cancel_reservation(
             raise HTTPException(status_code=400, detail="Only confirmed reservations can be cancelled")
 
         # --- DD-24: Determine if escrow should be refunded or forfeited ---
-        
-        # Check if user is a Trusted Account (>100 successful sessions)
+
+        # Check if user is a Trusted Account (>100 completed sessions)
         from app.models.session import ChargingSession
         successful_sessions = db.query(ChargingSession).join(Reservation).filter(
             Reservation.user_id == current_user.user_id,
-            ChargingSession.end_time.isnot(None),
-            ChargingSession.status == "Completed"
+            ChargingSession.end_time.isnot(None)
         ).count()
         is_trusted_account = successful_sessions > 100
 
@@ -319,9 +348,9 @@ def cancel_reservation(
 
         db.add(wallet_tx)
 
-        # Free port
+        # Free port and synchronously trigger waitlist promotion (DD-24)
         if port:
-            port.status = "Available"
+            WaitlistService.apply_promotion_or_release(db, port, waitlist_candidate)
 
         # Cancel reservation
         reservation.status = "Cancelled"
