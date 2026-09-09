@@ -12,6 +12,7 @@ import type {
   Station,
   User,
   Vehicle,
+  WaitlistStatus,
   WalletTransaction,
 } from '../types';
 
@@ -248,6 +249,25 @@ export const reservationService = {
   },
   cancel: async (reservationId: string): Promise<{ message?: string }> => {
     const { data } = await api.post<{ message?: string }>(`/reservations/${reservationId}/cancel`);
+    return data;
+  },
+};
+
+export const waitlistService = {
+  getStatus: async (): Promise<WaitlistStatus | null> => {
+    const { data } = await api.get<WaitlistStatus | null>('/waitlist/status');
+    return data ?? null;
+  },
+  join: async (payload: { station_id: string; vehicle_id: string; lat: number; lng: number }): Promise<WaitlistStatus> => {
+    const { data } = await api.post<WaitlistStatus>('/waitlist', payload);
+    return data;
+  },
+  leave: async (): Promise<{ message?: string }> => {
+    const { data } = await api.delete<{ message?: string }>('/waitlist');
+    return data;
+  },
+  confirmOffer: async (waitlistId: string): Promise<Reservation> => {
+    const { data } = await api.post<Reservation>(`/waitlist/${waitlistId}/confirm`);
     return data;
   },
 };
