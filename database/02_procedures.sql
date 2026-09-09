@@ -385,6 +385,95 @@ END;
 $$;
 
 
+CREATE OR REPLACE PROCEDURE sp_JoinWaitlist(
+    p_user_id UUID,
+    p_station_id UUID,
+    p_vehicle_id UUID,
+    p_closing_buffer_minutes INT
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_company_id UUID;
+    v_company_is_active BOOLEAN;
+    v_company_is_deprecating BOOLEAN;
+    v_station_is_active BOOLEAN;
+    v_station_minimum_fee DECIMAL;
+    v_station_price_per_kwh DECIMAL;
+    v_station_shift_end TIMESTAMP;
+    v_vehicle_user_id UUID;
+    v_vehicle_connector_type VARCHAR;
+    v_vehicle_is_active BOOLEAN;
+    v_user_wallet_balance DECIMAL;
+    v_user_banned_until TIMESTAMP;
+    v_user_is_active BOOLEAN;
+    v_existing_waitlist INT;
+    v_operational_ports INT;
+    v_available_unwarned_ports INT;
+    v_new_waitlist_id UUID;
+BEGIN
+    -- Tier 1: Companies > Stations
+    SELECT company_id INTO v_company_id FROM STATIONS WHERE station_id = p_station_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Station not found'; END IF;
+
+    SELECT is_active, is_deprecating INTO v_company_is_active, v_company_is_deprecating
+    FROM COMPANIES WHERE company_id = v_company_id FOR SHARE;
+
+    SELECT is_active, minimum_session_fee, price_per_kwh, current_shift_end_utc
+    INTO v_station_is_active, v_station_minimum_fee, v_station_price_per_kwh, v_station_shift_end
+    FROM STATIONS WHERE station_id = p_station_id FOR SHARE;
+
+    -- Tier 2.5: Vehicles (locked before ports so we know the connector type to scope the port lock)
+    SELECT user_id, connector_type, is_active INTO v_vehicle_user_id, v_vehicle_connector_type, v_vehicle_is_active
+    FROM VEHICLES WHERE vehicle_id = p_vehicle_id FOR SHARE;
+
+    IF NOT FOUND THEN RAISE EXCEPTION 'Vehicle not found'; END IF;
+
+    -- Tier 2: Charging Ports (lock every compatible port at this station in a stable order)
+    PERFORM 1 FROM CHARGING_PORTS
+    WHERE station_id = p_station_id AND connector_type = v_vehicle_connector_type
+    ORDER BY port_id FOR SHARE;
+
+    -- Tier 3: Users
+    SELECT wallet_balance, banned_until, is_active INTO v_user_wallet_balance, v_user_banned_until, v_user_is_active
+    FROM USERS WHERE user_id = p_user_id FOR UPDATE;
+
+    -- Validations
+    IF v_company_is_active = FALSE OR v_company_is_deprecating = TRUE THEN RAISE EXCEPTION 'Company is inactive or deprecating'; END IF;
+    IF v_station_is_active = FALSE THEN RAISE EXCEPTION 'Station is inactive'; END IF;
+    IF v_vehicle_is_active = FALSE THEN RAISE EXCEPTION 'Vehicle is inactive'; END IF;
+    IF v_vehicle_user_id != p_user_id THEN RAISE EXCEPTION 'Vehicle does not belong to user'; END IF;
+    IF v_user_is_active = FALSE THEN RAISE EXCEPTION 'User is inactive'; END IF;
+    IF v_user_banned_until IS NOT NULL AND v_user_banned_until > CURRENT_TIMESTAMP THEN RAISE EXCEPTION 'User is banned'; END IF;
+
+    SELECT COUNT(*) INTO v_existing_waitlist FROM WAITLIST WHERE user_id = p_user_id;
+    IF v_existing_waitlist > 0 THEN RAISE EXCEPTION 'User already has an active waitlist entry'; END IF;
+
+    IF v_user_wallet_balance < (1000 + v_station_minimum_fee) THEN RAISE EXCEPTION 'Insufficient wallet balance for pre-auth hold'; END IF;
+
+    SELECT COUNT(*) INTO v_operational_ports FROM CHARGING_PORTS
+    WHERE station_id = p_station_id AND connector_type = v_vehicle_connector_type
+      AND is_active = TRUE AND status NOT IN ('Offline', 'Maintenance');
+    IF v_operational_ports = 0 THEN RAISE EXCEPTION 'No operational ports for this connector type at this station'; END IF;
+
+    SELECT COUNT(*) INTO v_available_unwarned_ports FROM CHARGING_PORTS
+    WHERE station_id = p_station_id AND connector_type = v_vehicle_connector_type
+      AND is_active = TRUE AND status = 'Available' AND has_health_warning = FALSE AND has_blocked_warning = FALSE;
+    IF v_available_unwarned_ports > 0 THEN RAISE EXCEPTION 'An available port exists; reserve it directly instead of joining the waitlist'; END IF;
+
+    IF v_station_shift_end IS NOT NULL THEN
+        IF CURRENT_TIMESTAMP + (p_closing_buffer_minutes || ' minutes')::INTERVAL > v_station_shift_end THEN
+            RAISE EXCEPTION 'Station is closing too soon to join the waitlist';
+        END IF;
+    END IF;
+
+    INSERT INTO WAITLIST (user_id, station_id, vehicle_id, joined_tariff, joined_minimum_fee)
+    VALUES (p_user_id, p_station_id, p_vehicle_id, v_station_price_per_kwh, v_station_minimum_fee)
+    RETURNING waitlist_id INTO v_new_waitlist_id;
+
+END;
+$$;
+
 CREATE OR REPLACE PROCEDURE sp_StartSession(
     p_user_id UUID,
     p_reservation_id UUID,

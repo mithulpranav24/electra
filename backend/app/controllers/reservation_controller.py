@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 from typing import List
 from decimal import Decimal
 import uuid
@@ -15,6 +15,7 @@ from app.models.wallet import WalletTransaction
 from app.models.vehicle import Vehicle
 from app.models.audit import AuditLog
 from app.schemas.reservation_schema import ReservationCreate, ReservationResponse
+from app.services.waitlist_service import WaitlistService
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
 
@@ -44,20 +45,8 @@ def clean_expired_reservations(db: Session):
             ChargingPort.port_id == res.port_id
         ).first()
         if port:
-            from app.models.transient import Waitlist
-            from app.models.vehicle import Vehicle
-            waitlist_entry = db.query(Waitlist).join(Vehicle).filter(
-                Waitlist.station_id == port.station_id,
-                Waitlist.offered_port_id.is_(None),
-                Vehicle.connector_type == port.connector_type
-            ).order_by(Waitlist.joined_at.asc()).first()
-
-            if waitlist_entry:
-                port.status = "Pending Waitlist"
-                waitlist_entry.offered_port_id = port.port_id
-                waitlist_entry.offered_at = func.now()
-            else:
-                port.status = "Available"
+            candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type)
+            WaitlistService.apply_promotion_or_release(db, port, candidate)
 
         # SLA timeout: escrow is forfeited (no refund) per DD-24
         penalty_tx = WalletTransaction(
@@ -253,6 +242,12 @@ def cancel_reservation(
             User.user_id == current_user.user_id
         ).first()
 
+        # Tier 3.5: WAITLIST — lock the promotion candidate (if any) before the
+        # Tier 4 RESERVATIONS lock below, to respect the global lock hierarchy.
+        waitlist_candidate = None
+        if port:
+            waitlist_candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type)
+
         reservation = db.query(Reservation).with_for_update().filter(
             Reservation.reservation_id == reservation_id,
             Reservation.user_id == current_user.user_id
@@ -263,13 +258,12 @@ def cancel_reservation(
             raise HTTPException(status_code=400, detail="Only confirmed reservations can be cancelled")
 
         # --- DD-24: Determine if escrow should be refunded or forfeited ---
-        
-        # Check if user is a Trusted Account (>100 successful sessions)
+
+        # Check if user is a Trusted Account (>100 completed sessions)
         from app.models.session import ChargingSession
         successful_sessions = db.query(ChargingSession).join(Reservation).filter(
             Reservation.user_id == current_user.user_id,
-            ChargingSession.end_time.isnot(None),
-            ChargingSession.status == "Completed"
+            ChargingSession.end_time.isnot(None)
         ).count()
         is_trusted_account = successful_sessions > 100
 
@@ -319,9 +313,9 @@ def cancel_reservation(
 
         db.add(wallet_tx)
 
-        # Free port
+        # Free port and synchronously trigger waitlist promotion (DD-24)
         if port:
-            port.status = "Available"
+            WaitlistService.apply_promotion_or_release(db, port, waitlist_candidate)
 
         # Cancel reservation
         reservation.status = "Cancelled"
