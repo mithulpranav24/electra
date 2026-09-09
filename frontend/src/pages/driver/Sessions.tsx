@@ -4,7 +4,7 @@ import { CalendarClock, Clock3, History, MapPinned, XCircle } from 'lucide-react
 import { reservationService, waitlistService } from '../../services/api';
 import type { Reservation, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
-import { formatCurrency, formatDateTime, shortId } from '../../lib/format';
+import { formatCurrency, formatDateTime, parseUtc, shortId } from '../../lib/format';
 import { WaitlistStatusCard } from '../../components/WaitlistStatusCard';
 import { Badge } from '../../ui/Badge';
 import { statusTone } from '../../lib/status';
@@ -15,7 +15,7 @@ import { PageHeader, SectionHeader } from '../../ui/Page';
 import { useToast } from '../../ui/ToastContext';
 
 function arrivalLabel(expiresAt: string) {
-  const milliseconds = new Date(expiresAt).getTime() - Date.now();
+  const milliseconds = parseUtc(expiresAt).getTime() - Date.now();
   if (milliseconds <= 0) return 'Expiry is being processed';
   const minutes = Math.max(1, Math.ceil(milliseconds / 60000));
   return `${minutes} minute${minutes === 1 ? '' : 's'} remaining`;
