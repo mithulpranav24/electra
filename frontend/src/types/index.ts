@@ -83,6 +83,19 @@ export interface Reservation {
   created_at: string;
 }
 
+export interface WaitlistStatus {
+  waitlist_id: string;
+  station_id: string;
+  vehicle_id: string;
+  joined_at: string;
+  joined_tariff: number;
+  joined_minimum_fee: number;
+  position: number;
+  offered_port_id?: string | null;
+  offered_at?: string | null;
+  offer_expires_at?: string | null;
+}
+
 export interface WalletTransaction {
   transaction_id: string;
   amount: number;
