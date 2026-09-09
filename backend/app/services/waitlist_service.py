@@ -220,6 +220,11 @@ class WaitlistService:
         if not entry.offered_port_id:
             raise HTTPException(status_code=400, detail="No active offer to confirm")
 
+        # sp_ConfirmWaitlist deletes this WAITLIST row on success, and the session
+        # expires committed objects by default — capture what we need up front so
+        # we never touch `entry`'s attributes again after the commit below.
+        offered_port_id = entry.offered_port_id
+
         try:
             db.execute(
                 text("""
@@ -231,7 +236,7 @@ class WaitlistService:
                 {
                     "p_user_id": current_user.user_id,
                     "p_waitlist_id": waitlist_id,
-                    "p_port_id": entry.offered_port_id,
+                    "p_port_id": offered_port_id,
                     "p_grace_period_minutes": SLA_GRACE_PERIOD_MINUTES,
                     "p_cooldown_minutes": STANDARD_COOLDOWN_MINUTES,
                     "p_ip_address": str(ip_address),
@@ -256,7 +261,7 @@ class WaitlistService:
 
         new_res = (
             db.query(Reservation)
-            .filter(Reservation.user_id == current_user.user_id, Reservation.port_id == entry.offered_port_id)
+            .filter(Reservation.user_id == current_user.user_id, Reservation.port_id == offered_port_id)
             .order_by(Reservation.created_at.desc())
             .first()
         )
@@ -268,7 +273,7 @@ class WaitlistService:
             action="Waitlist Offer Confirmed",
             entity_type="RESERVATIONS",
             entity_id=new_res.reservation_id,
-            details={"port_id": str(entry.offered_port_id), "waitlist_id": str(waitlist_id)},
+            details={"port_id": str(offered_port_id), "waitlist_id": str(waitlist_id)},
             ip_address=str(ip_address),
         ))
         db.commit()
