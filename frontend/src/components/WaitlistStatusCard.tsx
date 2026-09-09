@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Clock3, ListOrdered, LogOut, Zap } from 'lucide-react';
 import type { WaitlistStatus } from '../types';
-import { formatDateTime } from '../lib/format';
+import { formatDateTime, parseUtc } from '../lib/format';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 
@@ -15,11 +15,11 @@ interface WaitlistStatusCardProps {
 }
 
 function useCountdown(deadline?: string | null) {
-  const [secondsLeft, setSecondsLeft] = useState(() => (deadline ? Math.max(0, Math.round((new Date(deadline).getTime() - Date.now()) / 1000)) : 0));
+  const [secondsLeft, setSecondsLeft] = useState(() => (deadline ? Math.max(0, Math.round((parseUtc(deadline).getTime() - Date.now()) / 1000)) : 0));
 
   useEffect(() => {
     if (!deadline) return;
-    const tick = () => setSecondsLeft(Math.max(0, Math.round((new Date(deadline).getTime() - Date.now()) / 1000)));
+    const tick = () => setSecondsLeft(Math.max(0, Math.round((parseUtc(deadline).getTime() - Date.now()) / 1000)));
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);

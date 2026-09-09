@@ -4,7 +4,7 @@ import { ArrowRight, BatteryCharging, Car, Clock3, History, MapPinned, ReceiptTe
 import { useAuth } from '../../context/auth-context';
 import { authService, reservationService, vehicleService } from '../../services/api';
 import type { DriverDashboardData, Reservation, Vehicle } from '../../types';
-import { formatCurrency, formatDateTime, shortId } from '../../lib/format';
+import { formatCurrency, formatDateTime, parseUtc, shortId } from '../../lib/format';
 import { getErrorMessage } from '../../lib/errors';
 import { Alert, EmptyState, ErrorState, Skeleton } from '../../ui/Feedback';
 import { Badge } from '../../ui/Badge';
@@ -104,7 +104,7 @@ export default function Dashboard() {
                   <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="mb-3 flex items-center gap-2"><Badge tone={statusTone(activeReservation.status)}>{activeReservation.status}</Badge><span className="font-data text-xs text-[var(--steel)]">Port {shortId(activeReservation.port_id)}</span></div>
-                      <h3 className="font-display text-2xl font-bold">Arrive before {new Date(activeReservation.expires_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</h3>
+                      <h3 className="font-display text-2xl font-bold">Arrive before {parseUtc(activeReservation.expires_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</h3>
                       <p className="mt-1 text-sm text-[var(--steel)]">Reserved {formatDateTime(activeReservation.created_at)}. Open activity to review cancellation details.</p>
                     </div>
                     <Link to="/driver/sessions"><Button variant="primary" icon={<ArrowRight size={17} />}>View reservation</Button></Link>
