@@ -43,6 +43,14 @@ BEGIN
         END IF;
     END IF;
 
+    -- A BEFORE DELETE trigger has no NEW row (it's NULL); returning NEW here
+    -- unconditionally would silently cancel every DELETE this function doesn't
+    -- explicitly RAISE EXCEPTION on (e.g. an incomplete, not-yet-ended
+    -- CHARGING_SESSIONS row), since Postgres treats a NULL return as "skip
+    -- this row" rather than "no objection." Must return OLD for DELETE.
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -130,6 +138,52 @@ CREATE TRIGGER trg_vehicles_soft_delete BEFORE UPDATE ON VEHICLES FOR EACH ROW E
 CREATE TRIGGER trg_companies_soft_delete BEFORE UPDATE ON COMPANIES FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
 CREATE TRIGGER trg_stations_soft_delete BEFORE UPDATE ON STATIONS FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
 CREATE TRIGGER trg_ports_soft_delete BEFORE UPDATE ON CHARGING_PORTS FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
+
+-- ==========================================
+-- 1.5 WALLET BALANCE MAINTENANCE (ACID compliance for wallet_balance,
+-- Phase 3.5). USERS.wallet_balance is a derived cache, not a source of
+-- truth: it is always recalculated as SUM(WALLET_TRANSACTIONS.amount) for
+-- the user, so every escrow hold/release, payment, refund, and penalty
+-- MUST be recorded as a WALLET_TRANSACTIONS row rather than writing
+-- wallet_balance directly - a direct UPDATE ... SET wallet_balance = ...
+-- is silently discarded the next time any transaction row for that user
+-- is inserted, updated, or deleted.
+-- ==========================================
+
+CREATE OR REPLACE FUNCTION update_wallet_balance_from_transactions()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        UPDATE USERS
+        SET wallet_balance = (
+            SELECT COALESCE(SUM(amount), 0)
+            FROM WALLET_TRANSACTIONS
+            WHERE user_id = OLD.user_id
+        )
+        WHERE user_id = OLD.user_id;
+        RETURN OLD;
+    ELSIF TG_OP = 'UPDATE' THEN
+        UPDATE USERS SET wallet_balance = (SELECT COALESCE(SUM(amount), 0) FROM WALLET_TRANSACTIONS WHERE user_id = OLD.user_id) WHERE user_id = OLD.user_id;
+        IF NEW.user_id != OLD.user_id THEN
+            UPDATE USERS SET wallet_balance = (SELECT COALESCE(SUM(amount), 0) FROM WALLET_TRANSACTIONS WHERE user_id = NEW.user_id) WHERE user_id = NEW.user_id;
+        END IF;
+        RETURN NEW;
+    ELSE -- INSERT
+        UPDATE USERS
+        SET wallet_balance = (
+            SELECT COALESCE(SUM(amount), 0)
+            FROM WALLET_TRANSACTIONS
+            WHERE user_id = NEW.user_id
+        )
+        WHERE user_id = NEW.user_id;
+        RETURN NEW;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_wallet_balance
+AFTER INSERT OR UPDATE OR DELETE ON WALLET_TRANSACTIONS
+FOR EACH ROW EXECUTE FUNCTION update_wallet_balance_from_transactions();
 
 -- ==========================================
 -- 3. STORED PROCEDURES
@@ -253,7 +307,7 @@ BEGIN
     VALUES (p_user_id, p_vehicle_id, p_port_id, 'Confirmed', v_station_price_per_kwh)
     RETURNING reservation_id INTO v_new_reservation_id;
 
-    -- UPDATE USERS SET wallet_balance = wallet_balance - 1000 WHERE user_id = p_user_id;
+    -- wallet_balance is maintained by trg_update_wallet_balance from this ledger row.
     INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -1000, 'Escrow Hold', v_new_reservation_id);
 
 END;
@@ -376,7 +430,7 @@ BEGIN
     VALUES (p_user_id, v_vehicle_id, p_port_id, 'Confirmed', v_waitlist_joined_at, LEAST(v_waitlist_joined_tariff, v_station_price_per_kwh))
     RETURNING reservation_id INTO v_new_reservation_id;
 
-    -- Escrow update
+    -- Escrow update: wallet_balance is maintained by trg_update_wallet_balance from this ledger row.
     INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -1000, 'Escrow Hold', v_new_reservation_id);
 
     DELETE FROM WAITLIST WHERE waitlist_id = p_waitlist_id;
@@ -494,6 +548,7 @@ DECLARE
     v_res_status reservation_status_enum;
     v_res_user_id UUID;
     v_port_status port_status_enum;
+    v_port_is_pending_maintenance BOOLEAN;
     v_user_is_suspended BOOLEAN;
     v_unpaid_invoices INT;
     v_user_wallet_balance DECIMAL;
@@ -516,7 +571,7 @@ BEGIN
     FROM STATIONS WHERE station_id = v_station_id FOR SHARE;
 
     -- Tier 2: Ports
-    SELECT status INTO v_port_status FROM CHARGING_PORTS WHERE port_id = v_port_id FOR UPDATE;
+    SELECT status, is_pending_maintenance INTO v_port_status, v_port_is_pending_maintenance FROM CHARGING_PORTS WHERE port_id = v_port_id FOR UPDATE;
 
     -- Tier 2.5: Vehicles
     SELECT battery_capacity INTO v_vehicle_battery_capacity FROM VEHICLES WHERE vehicle_id = v_vehicle_id FOR SHARE;
@@ -532,6 +587,8 @@ BEGIN
     IF v_res_status != 'Confirmed' THEN RAISE EXCEPTION 'Reservation is not Confirmed'; END IF;
     IF v_user_is_suspended = TRUE THEN RAISE EXCEPTION 'User is suspended'; END IF;
     IF v_port_status != 'Reserved' THEN RAISE EXCEPTION 'Port is not Reserved'; END IF;
+    -- DD-13: pending-maintenance validation is mandatory at session start
+    IF v_port_is_pending_maintenance = TRUE THEN RAISE EXCEPTION 'Port is pending maintenance'; END IF;
 
     SELECT COUNT(*) INTO v_unpaid_invoices FROM INVOICES WHERE user_id = p_user_id AND is_paid = FALSE;
     IF v_unpaid_invoices > 0 THEN RAISE EXCEPTION 'User has unpaid invoices'; END IF;
@@ -568,13 +625,17 @@ BEGIN
         RAISE EXCEPTION '402 Payment Required. Insufficient funds for secondary energy pre-authorization.';
     END IF;
 
-    -- Escrow deduct
-    -- UPDATE USERS SET wallet_balance = v_user_wallet_balance - (v_secondary_cost + 1000) WHERE user_id = p_user_id;
+    -- Escrow deduct: release the original 1000 hold, take the energy pre-auth as a
+    -- real payment, then re-hold 1000 for idle-fee risk. wallet_balance is maintained
+    -- by trg_update_wallet_balance as SUM(WALLET_TRANSACTIONS) - the net effect of
+    -- these three ledger rows is a single -v_secondary_cost (the two 1000s cancel
+    -- out), but each leg is recorded separately so it stays independently auditable.
     INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, 1000, 'Escrow Release', p_reservation_id);
     INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -v_secondary_cost, 'Session Payment', p_reservation_id);
     INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (p_user_id, -1000, 'Escrow Hold', p_reservation_id);
     UPDATE RESERVATIONS SET status = 'Active' WHERE reservation_id = p_reservation_id;
-    UPDATE CHARGING_PORTS SET status = 'Charging' WHERE port_id = v_port_id;
+    -- FR-16: a successful session instantly clears any health warning on the port
+    UPDATE CHARGING_PORTS SET status = 'Charging', has_health_warning = FALSE WHERE port_id = v_port_id;
 
     INSERT INTO CHARGING_SESSIONS (reservation_id, initial_battery_percentage, target_battery_percentage, applied_tariff)
     VALUES (p_reservation_id, p_initial_battery_percentage, v_clamped_target_battery, v_station_price_per_kwh);

@@ -3,10 +3,12 @@ import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
   AuthResponse,
   ChargingPort,
+  ChargingSessionStatus,
   Company,
   CompanyMembership,
   DriverDashboardData,
   Favorite,
+  Invoice,
   PaymentMethod,
   Reservation,
   Station,
@@ -268,6 +270,32 @@ export const waitlistService = {
   },
   confirmOffer: async (waitlistId: string): Promise<Reservation> => {
     const { data } = await api.post<Reservation>(`/waitlist/${waitlistId}/confirm`);
+    return data;
+  },
+};
+
+export const sessionService = {
+  start: async (payload: { reservation_id: string; initial_battery_percentage: number; target_battery_percentage: number }): Promise<ChargingSessionStatus> => {
+    const { data } = await api.post<ChargingSessionStatus>('/sessions/start', payload);
+    return data;
+  },
+  getActive: async (): Promise<ChargingSessionStatus | null> => {
+    const { data } = await api.get<ChargingSessionStatus | null>('/sessions/active');
+    return data ?? null;
+  },
+  stop: async (): Promise<Invoice> => {
+    const { data } = await api.post<Invoice>('/sessions/stop');
+    return data;
+  },
+};
+
+export const invoiceService = {
+  list: async (): Promise<Invoice[]> => {
+    const { data } = await api.get<Invoice[]>('/invoices');
+    return data;
+  },
+  payOutstanding: async (): Promise<{ message?: string }> => {
+    const { data } = await api.post<{ message?: string }>('/invoices/pay');
     return data;
   },
 };

@@ -83,6 +83,36 @@ export interface Reservation {
   created_at: string;
 }
 
+export interface ChargingSessionStatus {
+  session_id: string;
+  reservation_id: string;
+  port_id: string;
+  vehicle_id: string;
+  initial_battery_percentage: number;
+  target_battery_percentage: number;
+  applied_tariff: number;
+  start_time: string;
+  current_battery_percentage: number;
+  target_reached: boolean;
+  energy_delivered_kwh: number;
+  energy_cost: number;
+  idle_minutes: number;
+  idle_fee: number;
+  total_cost: number;
+  elapsed_minutes: number;
+  eta_minutes_remaining: number;
+}
+
+export interface Invoice {
+  invoice_id: string;
+  charging_session_id: string;
+  user_id: string;
+  total_amount: number;
+  is_paid: boolean;
+  paid_at?: string | null;
+  created_at: string;
+}
+
 export interface WaitlistStatus {
   waitlist_id: string;
   station_id: string;
