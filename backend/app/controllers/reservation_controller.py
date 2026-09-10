@@ -326,7 +326,11 @@ def cancel_reservation(
 
         # Apply refund or penalty
         if (is_short_hold and is_first_free_cancel) or is_faulty_charger:
-            # Eligible for escrow refund
+            # Eligible for escrow refund. wallet_balance is maintained by a DB
+            # trigger (trg_update_wallet_balance) as SUM(WALLET_TRANSACTIONS) for
+            # the user, so inserting this ledger row below is what actually
+            # updates the balance - writing user.wallet_balance directly here
+            # would just be discarded by the trigger's recalculation.
             cancel_reason = "User cancelled (Free)"
             wallet_tx = WalletTransaction(
                 user_id=current_user.user_id,
