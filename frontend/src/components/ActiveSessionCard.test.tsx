@@ -38,6 +38,18 @@ describe('ActiveSessionCard', () => {
     expect(screen.getByText('Idle fees are accruing')).toBeInTheDocument();
   });
 
+  it('shows "Idle — plugged in" during the fee-free grace period, without the fee warning', () => {
+    // Regression: target reached but idle_minutes is still 0 (within the
+    // 30-minute grace period before billable idle time starts) - the badge
+    // must switch away from "Charging" immediately, but the fee-accruing
+    // subtext should not appear yet since no fees are accruing.
+    const graceStatus: ChargingSessionStatus = { ...baseStatus, current_battery_percentage: 80, target_reached: true, idle_minutes: 0, idle_fee: 0 };
+    render(<ActiveSessionCard status={graceStatus} onStop={vi.fn()} />);
+    expect(screen.getByText('Idle — plugged in')).toBeInTheDocument();
+    expect(screen.queryByText('Charging')).not.toBeInTheDocument();
+    expect(screen.queryByText('Idle fees are accruing')).not.toBeInTheDocument();
+  });
+
   it('calls onStop when the stop button is clicked', () => {
     const onStop = vi.fn();
     render(<ActiveSessionCard status={baseStatus} onStop={onStop} />);

@@ -108,6 +108,20 @@ class TestChargingCurveMath:
         minutes = minutes_to_reach_target(Decimal("20"), Decimal("100"), Decimal("40"), Decimal("50"))
         assert abs(minutes - Decimal("76.8")) < Decimal("0.01")
 
+    def test_minutes_to_reach_target_starting_above_80_percent(self):
+        # Regression: starting already inside the throttled segment (e.g. 85%)
+        # must measure distance from initial_pct, not from the 80% boundary -
+        # the entire 20 -> 100% curve above only differs by starting later.
+        from app.services.session_service import minutes_to_reach_target
+        throttled_only = minutes_to_reach_target(Decimal("85"), Decimal("100"), Decimal("40"), Decimal("50"))
+        # 15% at throttled rate (20% of 50kW = 10kW): 6kWh / 10kW * 60 = 36 min
+        assert abs(throttled_only - Decimal("36")) < Decimal("0.01")
+
+        full_curve_throttled_leg = minutes_to_reach_target(Decimal("80"), Decimal("100"), Decimal("40"), Decimal("50"))
+        # 85% is 5 percentage points further into the same throttled segment
+        # than 80%, so it must take proportionally less time, not the same time.
+        assert throttled_only < full_curve_throttled_leg
+
     def test_current_battery_percentage_caps_at_target(self):
         from app.services.session_service import current_battery_percentage
         pct = current_battery_percentage(Decimal("20"), Decimal("30"), Decimal("40"), Decimal("50"), Decimal("1000"))
