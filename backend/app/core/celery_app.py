@@ -26,6 +26,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.waitlist_tasks.expire_reservations",
         "schedule": 60.0,
     },
+    # FR-16: force-terminate sessions idle for 24 accumulated hours.
+    "auto-terminate-stale-sessions": {
+        "task": "app.workers.session_tasks.auto_terminate_stale_sessions",
+        "schedule": 60.0,
+    },
 }
 
 # celery_app.autodiscover_tasks() only imports a module literally named
@@ -35,3 +40,4 @@ celery_app.conf.beat_schedule = {
 # Import task modules explicitly instead, after celery_app exists, since
 # their @celery_app.task decorators need it at import time.
 import app.workers.waitlist_tasks  # noqa: E402,F401
+import app.workers.session_tasks  # noqa: E402,F401
