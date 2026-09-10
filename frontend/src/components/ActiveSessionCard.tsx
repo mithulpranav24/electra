@@ -20,15 +20,21 @@ function formatMinutes(minutes: number) {
 
 export function ActiveSessionCard({ status, onStop, isStopping = false }: ActiveSessionCardProps) {
   const progressPercent = Math.min(100, Math.max(0, ((status.current_battery_percentage - status.initial_battery_percentage) / (status.target_battery_percentage - status.initial_battery_percentage || 1)) * 100));
-  const isIdle = status.target_reached && status.idle_minutes > 0;
+  // target_reached alone means "plugged in, energy has stopped flowing" - that's
+  // true throughout the 30-minute grace period too, before idle_minutes (billable
+  // idle time) starts accruing. Keeping these separate means the badge correctly
+  // switches away from "Charging" as soon as the target is hit, while the fee
+  // warning only appears once fees are actually accruing.
+  const isPluggedInIdle = status.target_reached;
+  const isAccruingFees = status.idle_minutes > 0;
 
   return (
     <section className="overflow-hidden rounded-[var(--radius-lg)] bg-[var(--night)] text-white shadow-[var(--shadow-md)]">
       <div className="flex flex-col gap-5 p-5 sm:p-7">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Badge tone={isIdle ? 'warning' : 'success'}>{isIdle ? 'Idle — plugged in' : 'Charging'}</Badge>
-            {isIdle && <span className="text-xs font-semibold text-white/60">Idle fees are accruing</span>}
+            <Badge tone={isPluggedInIdle ? 'warning' : 'success'}>{isPluggedInIdle ? 'Idle — plugged in' : 'Charging'}</Badge>
+            {isAccruingFees && <span className="text-xs font-semibold text-white/60">Idle fees are accruing</span>}
           </div>
           <Button variant="danger" onClick={onStop} isLoading={isStopping}>Stop charging</Button>
         </div>
