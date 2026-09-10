@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CalendarClock, Clock3, History, MapPinned, XCircle } from 'lucide-react';
-import { reservationService, waitlistService } from '../../services/api';
-import type { Reservation, WaitlistStatus } from '../../types';
+import { BatteryCharging, CalendarClock, Clock3, History, MapPinned, ReceiptText, XCircle } from 'lucide-react';
+import { invoiceService, reservationService, sessionService, waitlistService } from '../../services/api';
+import type { ChargingSessionStatus, Invoice, Reservation, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency, formatDateTime, parseUtc, shortId } from '../../lib/format';
+import { ActiveSessionCard } from '../../components/ActiveSessionCard';
+import { StartSessionModal } from '../../components/StartSessionModal';
 import { WaitlistStatusCard } from '../../components/WaitlistStatusCard';
 import { Badge } from '../../ui/Badge';
 import { statusTone } from '../../lib/status';
@@ -24,12 +26,18 @@ function arrivalLabel(expiresAt: string) {
 export function Sessions() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [waitlistStatus, setWaitlistStatus] = useState<WaitlistStatus | null>(null);
+  const [activeSession, setActiveSession] = useState<ChargingSessionStatus | null>(null);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [cancelling, setCancelling] = useState<Reservation | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isLeavingWaitlist, setIsLeavingWaitlist] = useState(false);
   const [isConfirmingOffer, setIsConfirmingOffer] = useState(false);
+  const [startingReservation, setStartingReservation] = useState<Reservation | null>(null);
+  const [isStartingSession, setIsStartingSession] = useState(false);
+  const [isStoppingSession, setIsStoppingSession] = useState(false);
+  const [isPayingInvoices, setIsPayingInvoices] = useState(false);
   const { pushToast } = useToast();
   const navigate = useNavigate();
 
@@ -37,12 +45,16 @@ export function Sessions() {
     setError('');
     setIsLoading(true);
     try {
-      const [active, waitlist] = await Promise.all([
+      const [active, waitlist, session, invoiceList] = await Promise.all([
         reservationService.getActive(),
         waitlistService.getStatus().catch(() => null),
+        sessionService.getActive().catch(() => null),
+        invoiceService.list().catch(() => []),
       ]);
       setReservations(active);
       setWaitlistStatus(waitlist);
+      setActiveSession(session);
+      setInvoices(invoiceList);
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Active reservations could not be loaded.'));
     } finally {
@@ -60,6 +72,66 @@ export function Sessions() {
     }, 10000);
     return () => clearInterval(interval);
   }, [activeWaitlistId]);
+
+  const activeSessionId = activeSession?.session_id ?? null;
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const interval = setInterval(() => {
+      sessionService.getActive().then(setActiveSession).catch(() => {});
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [activeSessionId]);
+
+  const handleStartSession = async (initialPercentage: number, targetPercentage: number) => {
+    if (!startingReservation) return;
+    setIsStartingSession(true);
+    try {
+      const session = await sessionService.start({
+        reservation_id: startingReservation.reservation_id,
+        initial_battery_percentage: initialPercentage,
+        target_battery_percentage: targetPercentage,
+      });
+      setActiveSession(session);
+      setStartingReservation(null);
+      await loadReservations();
+      pushToast({ title: 'Charging started', message: 'Progress updates automatically as energy is delivered.', tone: 'success' });
+    } catch (startError) {
+      pushToast({ title: 'Couldn’t start charging', message: getErrorMessage(startError, 'Check your wallet balance and try again.'), tone: 'error' });
+    } finally {
+      setIsStartingSession(false);
+    }
+  };
+
+  const handleStopSession = async () => {
+    setIsStoppingSession(true);
+    try {
+      const invoice = await sessionService.stop();
+      setActiveSession(null);
+      await loadReservations();
+      pushToast({
+        title: 'Charging stopped',
+        message: invoice.is_paid ? `Invoice of ${formatCurrency(invoice.total_amount)} settled from your wallet.` : `Invoice of ${formatCurrency(invoice.total_amount)} exceeds your balance — your account is suspended until it's paid.`,
+        tone: invoice.is_paid ? 'success' : 'error',
+      });
+    } catch (stopError) {
+      pushToast({ title: 'Couldn’t stop charging', message: getErrorMessage(stopError, 'Try again.'), tone: 'error' });
+    } finally {
+      setIsStoppingSession(false);
+    }
+  };
+
+  const handlePayInvoices = async () => {
+    setIsPayingInvoices(true);
+    try {
+      await invoiceService.payOutstanding();
+      await loadReservations();
+      pushToast({ title: 'Outstanding invoices settled', tone: 'success' });
+    } catch (payError) {
+      pushToast({ title: 'Couldn’t settle invoices', message: getErrorMessage(payError, 'Top up your wallet first.'), tone: 'error' });
+    } finally {
+      setIsPayingInvoices(false);
+    }
+  };
 
   const handleLeaveWaitlist = async () => {
     setIsLeavingWaitlist(true);
@@ -119,6 +191,10 @@ export function Sessions() {
         />
       )}
 
+      {activeSession && (
+        <ActiveSessionCard status={activeSession} onStop={() => void handleStopSession()} isStopping={isStoppingSession} />
+      )}
+
       <section className="surface overflow-hidden">
         <div className="border-b border-[var(--line)] p-5 sm:p-6"><SectionHeader title="Active reservations" description="You can hold one active reservation across all vehicles." /></div>
         {isLoading ? <LoadingState label="Checking active reservations" /> : error ? <div className="p-4 sm:p-5"><ErrorState description={error} onRetry={() => void loadReservations()} /></div> : reservations.length === 0 ? (
@@ -133,7 +209,14 @@ export function Sessions() {
                     <h3 className="font-display text-xl font-bold">Arrive by {formatDateTime(reservation.expires_at)}</h3>
                     <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-[#78560b]"><Clock3 size={16} /> {arrivalLabel(reservation.expires_at)}</p>
                   </div>
-                  <Button variant="danger" icon={<XCircle size={17} />} onClick={() => setCancelling(reservation)}>Cancel reservation</Button>
+                  {reservation.status === 'Active' ? (
+                    <Badge tone="warning">Charging in progress</Badge>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="primary" icon={<BatteryCharging size={17} />} onClick={() => setStartingReservation(reservation)}>Start charging</Button>
+                      <Button variant="danger" icon={<XCircle size={17} />} onClick={() => setCancelling(reservation)}>Cancel reservation</Button>
+                    </div>
+                  )}
                 </div>
                 <dl className="mt-5 grid gap-3 sm:grid-cols-3">
                   <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Port</dt><dd className="font-data mt-1 truncate font-bold" title={reservation.port_id}>{shortId(reservation.port_id, 12)}</dd></div>
@@ -147,8 +230,26 @@ export function Sessions() {
       </section>
 
       <section className="surface overflow-hidden">
-        <div className="border-b border-[var(--line)] p-5 sm:p-6"><SectionHeader title="Charging history" description="Completed sessions will include energy, cost, vehicle, and invoice details." /></div>
-        <EmptyState title="No completed sessions available" description="The current backend does not yet expose charging-session history. This section is ready to display it when that API is connected." icon={<History size={23} />} />
+        <div className="border-b border-[var(--line)] p-5 sm:p-6"><SectionHeader title="Invoices" description="Generated automatically when a charging session ends." /></div>
+        {invoices.length === 0 ? (
+          <EmptyState title="No invoices yet" description="Start a charging session to generate your first invoice." icon={<History size={23} />} />
+        ) : (
+          <div className="divide-y divide-[var(--line)]">
+            {invoices.some((invoice) => !invoice.is_paid) && (
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-[var(--red-soft)] p-4 sm:p-5">
+                <p className="text-sm font-bold text-[var(--red-dark)]">One or more invoices are unpaid. Your account is suspended until they're settled.</p>
+                <Button variant="danger" onClick={() => void handlePayInvoices()} isLoading={isPayingInvoices}>Settle from wallet</Button>
+              </div>
+            )}
+            {invoices.map((invoice) => (
+              <div key={invoice.invoice_id} className="flex items-center gap-4 px-5 py-4 sm:px-6">
+                <span className={`flex size-10 shrink-0 items-center justify-center rounded-full ${invoice.is_paid ? 'bg-[var(--teal-soft)] text-[var(--teal-dark)]' : 'bg-[var(--red-soft)] text-[var(--red)]'}`}><ReceiptText size={18} /></span>
+                <div className="min-w-0 flex-1"><p className="truncate font-bold">{formatDateTime(invoice.created_at)}</p><p className="font-data text-xs text-[var(--steel)]" title={invoice.invoice_id}>{shortId(invoice.invoice_id, 12)}</p></div>
+                <div className="text-right"><p className="font-data font-bold">{formatCurrency(invoice.total_amount)}</p><Badge tone={invoice.is_paid ? 'success' : 'danger'}>{invoice.is_paid ? 'Paid' : 'Unpaid'}</Badge></div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <ConfirmDialog
@@ -159,6 +260,13 @@ export function Sessions() {
         description="The backend decides whether the ₹1,000 escrow is refunded based on how long the port was held and your recent cancellation history. If the free-cancellation conditions are not met, the escrow is forfeited."
         confirmLabel="Cancel reservation"
         isLoading={isCancelling}
+      />
+
+      <StartSessionModal
+        open={Boolean(startingReservation)}
+        onClose={() => setStartingReservation(null)}
+        onConfirm={(initialPercentage, targetPercentage) => void handleStartSession(initialPercentage, targetPercentage)}
+        isLoading={isStartingSession}
       />
     </div>
   );
