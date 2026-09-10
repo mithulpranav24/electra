@@ -5,7 +5,7 @@ from uuid import UUID
 from decimal import Decimal
 
 class SessionStartRequest(BaseModel):
-    reservation_id: str
+    reservation_id: UUID
     initial_battery_percentage: Decimal
     target_battery_percentage: Decimal
 

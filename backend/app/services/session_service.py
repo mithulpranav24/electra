@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
+from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import text
@@ -66,7 +67,11 @@ def minutes_to_reach_target(initial_pct: Decimal, target_pct: Decimal, battery_c
     if initial_pct < segment1_end and full_rate > 0:
         minutes += (segment1_end - initial_pct) / full_rate
     if target_pct > segment1_end and throttled_rate > 0:
-        minutes += (target_pct - segment1_end) / throttled_rate
+        # max(initial_pct, segment1_end): if initial_pct is already above 80%
+        # (e.g. 85), the throttled segment starts from there, not from 80 -
+        # using segment1_end unconditionally would overcount the distance to
+        # cover by (initial_pct - 80).
+        minutes += (target_pct - max(initial_pct, segment1_end)) / throttled_rate
     return minutes
 
 
@@ -160,7 +165,7 @@ def compute_snapshot(session: ChargingSession, vehicle: Vehicle, port: ChargingP
 
 class SessionService:
     @staticmethod
-    def start_session(db: Session, current_user: User, reservation_id: str, initial_pct: Decimal, target_pct: Decimal, ip_address: str) -> ChargingSession:
+    def start_session(db: Session, current_user: User, reservation_id: UUID, initial_pct: Decimal, target_pct: Decimal, ip_address: str) -> ChargingSession:
         try:
             db.execute(
                 text("""
@@ -368,10 +373,23 @@ class SessionService:
 
     @staticmethod
     def auto_terminate_stale_sessions(db: Session) -> int:
-        """FR-16: sessions idle for 24 accumulated hours are force-terminated -
-        port goes Offline (operator intervention required, no waitlist
-        promotion) and a 5000 INR abandonment penalty is added to the invoice."""
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=AUTO_TERMINATION_HOURS)
+        """FR-16: sessions IDLE (power delivery stopped, i.e. target reached)
+        for 24 accumulated hours are force-terminated - port goes Offline
+        (operator intervention required, no waitlist promotion) and a 5000
+        INR abandonment penalty is added to the invoice.
+
+        "24 accumulated hours" means idle time, not total session duration -
+        a vehicle that charges slowly for hours before reaching target
+        shouldn't be cut off before it has actually been idle for a day. The
+        SQL filter below (start_time <= 24h ago) is a safe, loose pre-filter:
+        total session duration is always >= idle duration, so it can never
+        exclude a session that's genuinely due, only include some that
+        aren't yet (still mid-charge, or idle for less than 24h) - those are
+        skipped by the precise per-candidate check once vehicle/port details
+        are available to recompute how long the charge itself took.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        cutoff = now - timedelta(hours=AUTO_TERMINATION_HOURS)
 
         stale_ids = [
             row[0]
@@ -393,6 +411,17 @@ class SessionService:
             vehicle = db.query(Vehicle).filter(Vehicle.vehicle_id == reservation.vehicle_id).first()
             station = db.query(Station).filter(Station.station_id == port.station_id).first()
 
+            elapsed_minutes = Decimal((now - optimistic.start_time).total_seconds()) / Decimal("60")
+            minutes_to_target = minutes_to_reach_target(
+                Decimal(str(optimistic.initial_battery_percentage)),
+                Decimal(str(optimistic.target_battery_percentage)),
+                Decimal(str(vehicle.battery_capacity)),
+                port_power_kw(port.charger_type),
+            )
+            idle_minutes_raw = elapsed_minutes - minutes_to_target
+            if idle_minutes_raw < Decimal(AUTO_TERMINATION_HOURS * 60):
+                continue
+
             db.query(Station).with_for_update(read=True, of=Station).filter(Station.station_id == station.station_id).first()
             port_locked = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == port.port_id).first()
             db.query(Vehicle).with_for_update(read=True).filter(Vehicle.vehicle_id == vehicle.vehicle_id).first()
@@ -404,9 +433,13 @@ class SessionService:
                 db.rollback()
                 continue
 
-            end_time = session_locked.start_time + timedelta(hours=AUTO_TERMINATION_HOURS)
+            # end_time is "now" (the actual moment of forced termination), not a
+            # fixed start_time + 24h: energy is already naturally capped by the
+            # simulation once the target is reached, so this only affects idle
+            # fees, which per DD-06 are meant to keep accruing (uncapped, in the
+            # blockage tier) for exactly as long as the vehicle is genuinely idle.
             SessionService._settle_and_finalize(
-                db, session_locked, reservation_locked, vehicle, port_locked, station, user, end_time,
+                db, session_locked, reservation_locked, vehicle, port_locked, station, user, now,
                 extra_penalty=ABANDONMENT_PENALTY, port_goes_offline=True, ip_address="system",
             )
             db.commit()
