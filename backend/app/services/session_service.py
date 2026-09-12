@@ -7,7 +7,6 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.models.audit import AuditLog
 from app.models.invoice import Invoice
 from app.models.reservation import Reservation
 from app.models.session import ChargingSession
@@ -15,6 +14,8 @@ from app.models.station import ChargingPort, Station
 from app.models.user import User
 from app.models.vehicle import Vehicle
 from app.models.wallet import WalletTransaction
+from app.services.audit_service import log_audit_event
+from app.services.penalty_service import PenaltyService
 from app.services.waitlist_service import WaitlistService
 
 ESCROW_AMOUNT = Decimal("1000.00")
@@ -210,15 +211,15 @@ class SessionService:
         if not session:
             raise HTTPException(status_code=500, detail="Failed to retrieve created session")
 
-        db.add(AuditLog(
+        log_audit_event(
+            db,
             user_id=current_user.user_id,
             action="Charging Session Started",
             entity_type="CHARGING_SESSIONS",
             entity_id=session.session_id,
             details={"reservation_id": str(reservation_id)},
             ip_address=str(ip_address),
-        ))
-        db.commit()
+        )
         return session
 
     @staticmethod
@@ -312,6 +313,7 @@ class SessionService:
             paid_at=at_time if is_paid else None,
         )
         db.add(invoice)
+        db.flush()
 
         # Split into two ledger legs so abandonment penalties stay independently
         # auditable; they sum to the same settlement_delta computed above
@@ -329,7 +331,8 @@ class SessionService:
             candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
             WaitlistService.apply_promotion_or_release(db, port, candidate)
 
-        db.add(AuditLog(
+        log_audit_event(
+            db,
             user_id=user.user_id,
             action="Charging Session Ended",
             entity_type="CHARGING_SESSIONS",
@@ -340,7 +343,18 @@ class SessionService:
                 "abandonment": extra_penalty > 0,
             },
             ip_address=str(ip_address),
-        ))
+            commit=False,
+        )
+        log_audit_event(
+            db,
+            user_id=user.user_id,
+            action="Invoice Generated",
+            entity_type="INVOICES",
+            entity_id=invoice.invoice_id,
+            details={"total_amount": str(total_due), "is_paid": is_paid},
+            ip_address=str(ip_address),
+            commit=False,
+        )
         return invoice
 
     @staticmethod
@@ -446,3 +460,60 @@ class SessionService:
             terminated += 1
 
         return terminated
+
+    @staticmethod
+    def enforce_overstay_penalties(db: Session) -> int:
+        """FR-21 'Overstay Penalty Enforcer': 1 penalty point for overstaying
+        after charging is complete, i.e. once the free 30-minute grace period
+        (IDLE_GRACE_MINUTES) following target_reached has elapsed. Fires
+        exactly once per session via is_overstay_penalized, independently of
+        the 24-hour auto-termination sweep above (a session can overstay long
+        before it's anywhere near auto-termination).
+        """
+        candidate_ids = [
+            row[0]
+            for row in db.query(ChargingSession.session_id)
+            .filter(ChargingSession.end_time.is_(None), ChargingSession.is_overstay_penalized.is_(False))
+            .order_by(ChargingSession.session_id.asc())
+            .all()
+        ]
+
+        penalized = 0
+        for session_id in candidate_ids:
+            optimistic = db.query(ChargingSession).filter(ChargingSession.session_id == session_id).first()
+            if not optimistic or optimistic.end_time is not None or optimistic.is_overstay_penalized:
+                continue
+            reservation = db.query(Reservation).filter(Reservation.reservation_id == optimistic.reservation_id).first()
+            if not reservation:
+                continue
+            port = db.query(ChargingPort).filter(ChargingPort.port_id == reservation.port_id).first()
+            vehicle = db.query(Vehicle).filter(Vehicle.vehicle_id == reservation.vehicle_id).first()
+            if not port or not vehicle:
+                continue
+
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            elapsed_minutes = Decimal((now - optimistic.start_time).total_seconds()) / Decimal("60")
+            minutes_to_target = minutes_to_reach_target(
+                Decimal(str(optimistic.initial_battery_percentage)),
+                Decimal(str(optimistic.target_battery_percentage)),
+                Decimal(str(vehicle.battery_capacity)),
+                port_power_kw(port.charger_type),
+            )
+            minutes_since_target = max(Decimal("0"), elapsed_minutes - minutes_to_target)
+            if billable_idle_minutes(minutes_since_target) <= 0:
+                continue
+
+            # Tier 3: USERS before Tier 6: CHARGING_SESSIONS.
+            user = db.query(User).with_for_update().filter(User.user_id == reservation.user_id).first()
+            session_locked = db.query(ChargingSession).with_for_update().filter(ChargingSession.session_id == session_id).first()
+
+            if not user or not session_locked or session_locked.end_time is not None or session_locked.is_overstay_penalized:
+                db.rollback()
+                continue
+
+            session_locked.is_overstay_penalized = True
+            PenaltyService.assign_penalty_point(db, user, "Overstay After Charging Complete")
+            db.commit()
+            penalized += 1
+
+        return penalized

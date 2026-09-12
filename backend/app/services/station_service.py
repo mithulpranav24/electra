@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from app.models.station import Station, ChargingPort
 from app.models.company import CompanyOperatorMembership
 from app.schemas.station import StationCreate, StationUpdate, ChargingPortCreate, ChargingPortUpdate
+from app.services.audit_service import log_audit_event
 
 class StationService:
     @staticmethod
@@ -63,15 +64,15 @@ class StationService:
         return [StationService._to_schema(db, s) for s in stations]
 
     @staticmethod
-    def update_station(db: Session, user_id: str, station_id: str, station_in: StationUpdate):
+    def update_station(db: Session, user_id: str, station_id: str, station_in: StationUpdate, ip_address: str = "unknown"):
         station = db.query(Station).filter(Station.station_id == station_id).first()
         if not station:
             raise HTTPException(status_code=404, detail="Station not found")
-            
+
         StationService._check_operator_permission(db, user_id, str(station.company_id))
-        
+
         update_data = station_in.model_dump(exclude_unset=True)
-        
+
         if 'lat' in update_data and 'lng' in update_data:
             lat = update_data.pop('lat')
             lng = update_data.pop('lng')
@@ -79,10 +80,20 @@ class StationService:
         elif 'lat' in update_data or 'lng' in update_data:
             # Need both to update
             raise HTTPException(status_code=400, detail="Both lat and lng must be provided to update coordinates")
-            
+
         for key, value in update_data.items():
             setattr(station, key, value)
-            
+
+        log_audit_event(
+            db,
+            user_id=user_id,
+            action="Station Updated",
+            entity_type="STATIONS",
+            entity_id=station.station_id,
+            details={"fields": list(update_data.keys())},
+            ip_address=ip_address,
+            commit=False,
+        )
         db.commit()
         db.refresh(station)
         return StationService._to_schema(db, station)
@@ -125,18 +136,28 @@ class StationService:
             raise HTTPException(status_code=400, detail="Invalid data or QR code already exists")
 
     @staticmethod
-    def update_port(db: Session, user_id: str, port_id: str, port_in: ChargingPortUpdate):
+    def update_port(db: Session, user_id: str, port_id: str, port_in: ChargingPortUpdate, ip_address: str = "unknown"):
         port = db.query(ChargingPort).filter(ChargingPort.port_id == port_id).first()
         if not port:
             raise HTTPException(status_code=404, detail="Port not found")
-            
+
         station = port.station
         StationService._check_operator_permission(db, user_id, str(station.company_id))
-        
+
         update_data = port_in.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(port, key, value)
-            
+
+        log_audit_event(
+            db,
+            user_id=user_id,
+            action="Station Updated",
+            entity_type="CHARGING_PORTS",
+            entity_id=port.port_id,
+            details={"fields": list(update_data.keys())},
+            ip_address=ip_address,
+            commit=False,
+        )
         db.commit()
         db.refresh(port)
         return port
