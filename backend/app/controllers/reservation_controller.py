@@ -13,8 +13,8 @@ from app.models.station import Station, ChargingPort
 from app.models.reservation import Reservation
 from app.models.wallet import WalletTransaction
 from app.models.vehicle import Vehicle
-from app.models.audit import AuditLog
 from app.schemas.reservation_schema import ReservationCreate, ReservationResponse
+from app.services.audit_service import log_audit_event
 from app.services.waitlist_service import WaitlistService
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
@@ -87,6 +87,16 @@ def clean_expired_reservations(db: Session):
             reference_id=res.reservation_id
         )
         db.add(penalty_tx)
+        log_audit_event(
+            db,
+            user_id=res.user_id,
+            action="Reservation Cancelled",
+            entity_type="RESERVATIONS",
+            entity_id=res.reservation_id,
+            details={"reason": res.cancellation_reason},
+            ip_address="system",
+            commit=False,
+        )
         db.commit()
 
 @router.post("", response_model=ReservationResponse)
@@ -182,16 +192,15 @@ def create_reservation(
         if not new_res:
             raise HTTPException(status_code=500, detail="Failed to retrieve created reservation")
             
-        audit = AuditLog(
+        log_audit_event(
+            db,
             user_id=current_user.user_id,
             action="Reservation Created",
             entity_type="RESERVATIONS",
             entity_id=new_res.reservation_id,
             details={"port_id": str(target_port_id), "vehicle_id": str(request.vehicle_id)},
-            ip_address=str(ip_address)
+            ip_address=str(ip_address),
         )
-        db.add(audit)
-        db.commit()
 
         return new_res
 
@@ -361,15 +370,16 @@ def cancel_reservation(
         reservation.cancellation_reason = cancel_reason
         reservation.status_updated_at = now
 
-        audit = AuditLog(
+        log_audit_event(
+            db,
             user_id=current_user.user_id,
             action="Reservation Cancelled",
             entity_type="RESERVATIONS",
             entity_id=reservation.reservation_id,
             details={"reason": cancel_reason},
-            ip_address=fastapi_req.client.host if fastapi_req.client else "unknown"
+            ip_address=fastapi_req.client.host if fastapi_req.client else "unknown",
+            commit=False,
         )
-        db.add(audit)
 
         db.commit()
         return {"success": True, "message": response_message}

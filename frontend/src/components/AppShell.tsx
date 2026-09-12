@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
+  BarChart3,
   Building2,
   Car,
   CircleUserRound,
@@ -34,8 +35,14 @@ const navigation: Record<UserRole, NavigationItem[]> = {
     { to: '/driver/wallet', label: 'Wallet & billing', shortLabel: 'Wallet', icon: Wallet, mobile: true },
     { to: '/driver/profile', label: 'Account', icon: CircleUserRound },
   ],
-  Operator: [{ to: '/operator/dashboard', label: 'Station operations', shortLabel: 'Operations', icon: MapPinned, mobile: true }],
-  Admin: [{ to: '/admin/dashboard', label: 'Organization control', shortLabel: 'Organizations', icon: Building2, mobile: true }],
+  Operator: [
+    { to: '/operator/dashboard', label: 'Station operations', shortLabel: 'Operations', icon: MapPinned, mobile: true },
+    { to: '/operator/reports', label: 'Reports', icon: BarChart3, mobile: true },
+  ],
+  Admin: [
+    { to: '/admin/dashboard', label: 'Organization control', shortLabel: 'Organizations', icon: Building2, mobile: true },
+    { to: '/admin/reports', label: 'Reports', icon: BarChart3, mobile: true },
+  ],
 };
 
 function isItemActive(pathname: string, item: NavigationItem) {

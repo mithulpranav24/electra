@@ -26,3 +26,16 @@ def expire_reservations() -> None:
         clean_expired_reservations(db)
     finally:
         db.close()
+
+
+@celery_app.task(name="app.workers.waitlist_tasks.clear_waitlist_for_banned_users")
+def clear_waitlist_for_banned_users() -> int:
+    """FR-21: asynchronously clears a banned user's own WAITLIST entry
+    (promoting the next candidate if the entry held an active offer), since
+    applying the ban itself cannot safely do this without inverting the
+    global lock hierarchy."""
+    db = SessionLocal()
+    try:
+        return WaitlistService.clear_waitlist_for_banned_users(db)
+    finally:
+        db.close()
