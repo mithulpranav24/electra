@@ -219,6 +219,7 @@ CREATE TABLE PENALTIES (
     is_served BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_penalties_user_unserved ON PENALTIES(user_id, is_served);
 
 CREATE TABLE MAINTENANCE_SCHEDULES (
     maintenance_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

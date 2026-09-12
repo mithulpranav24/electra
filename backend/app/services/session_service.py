@@ -499,15 +499,57 @@ class SessionService:
                 Decimal(str(vehicle.battery_capacity)),
                 port_power_kw(port.charger_type),
             )
-            minutes_since_target = max(Decimal("0"), elapsed_minutes - minutes_to_target)
+
+            # Architecture.md 3.4 "Overstay Penalty Enforcer": while the station's
+            # gate is currently locked, the driver is physically prevented from
+            # retrieving their vehicle, so that time must not count as idle. The
+            # session's own idle_start_time is never persisted elsewhere (the
+            # "target reached" moment is purely derived, not an event), so it's
+            # approximated here as start_time + minutes_to_target, mirroring the
+            # optimistic elapsed-time calculation above.
+            station_optimistic = db.query(Station).filter(Station.station_id == port.station_id).first()
+            if not station_optimistic:
+                continue
+            closure_seconds = Decimal(optimistic.cumulative_closure_seconds or 0)
+            if station_optimistic.locked_gate and station_optimistic.locked_gate_at:
+                idle_start = optimistic.start_time + timedelta(minutes=float(minutes_to_target))
+                active_closure = (now - max(station_optimistic.locked_gate_at, idle_start)).total_seconds()
+                closure_seconds += Decimal(max(0, active_closure))
+
+            effective_elapsed_minutes = max(Decimal("0"), elapsed_minutes - closure_seconds / Decimal("60"))
+            minutes_since_target = max(Decimal("0"), effective_elapsed_minutes - minutes_to_target)
             if billable_idle_minutes(minutes_since_target) <= 0:
                 continue
 
-            # Tier 3: USERS before Tier 6: CHARGING_SESSIONS.
+            # Global lock hierarchy (Architecture.md 3.5): Tier 1 STATIONS FOR
+            # SHARE -> Tier 2 CHARGING_PORTS FOR SHARE -> Tier 3 USERS FOR UPDATE
+            # -> Tier 6 CHARGING_SESSIONS FOR UPDATE.
+            station = db.query(Station).with_for_update(read=True, of=Station).filter(Station.station_id == port.station_id).first()
+            port_locked = db.query(ChargingPort).with_for_update(read=True, of=ChargingPort).filter(ChargingPort.port_id == port.port_id).first()
             user = db.query(User).with_for_update().filter(User.user_id == reservation.user_id).first()
             session_locked = db.query(ChargingSession).with_for_update().filter(ChargingSession.session_id == session_id).first()
 
-            if not user or not session_locked or session_locked.end_time is not None or session_locked.is_overstay_penalized:
+            if (
+                not station
+                or not port_locked
+                or not user
+                or not session_locked
+                or session_locked.end_time is not None
+                or session_locked.is_overstay_penalized
+            ):
+                db.rollback()
+                continue
+
+            # Re-validate under lock: the gate may have been locked/unlocked
+            # concurrently since the optimistic read above.
+            closure_seconds = Decimal(session_locked.cumulative_closure_seconds or 0)
+            if station.locked_gate and station.locked_gate_at:
+                idle_start = session_locked.start_time + timedelta(minutes=float(minutes_to_target))
+                active_closure = (now - max(station.locked_gate_at, idle_start)).total_seconds()
+                closure_seconds += Decimal(max(0, active_closure))
+            effective_elapsed_minutes = max(Decimal("0"), elapsed_minutes - closure_seconds / Decimal("60"))
+            minutes_since_target = max(Decimal("0"), effective_elapsed_minutes - minutes_to_target)
+            if billable_idle_minutes(minutes_since_target) <= 0:
                 db.rollback()
                 continue
 

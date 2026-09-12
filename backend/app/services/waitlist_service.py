@@ -270,6 +270,10 @@ class WaitlistService:
         db.delete(entry)
 
         if port is not None and port.status == "Pending Waitlist":
+            # Architecture.md 3.3.3 Rule 7: leaving while holding an active offer
+            # is processed as an ignored offer (1 penalty point), even though the
+            # entry itself is removed rather than left for the offer to expire.
+            PenaltyService.assign_penalty_point(db, current_user, "Ignored Waitlist Offer")
             candidate = WaitlistService.find_candidate_waitlist_entry(db, entry.station_id, port.connector_type, port.port_id)
             WaitlistService.apply_promotion_or_release(db, port, candidate)
 
@@ -480,6 +484,15 @@ class WaitlistService:
                 continue
             # Re-check under lock: the ban may have been lifted, or the entry already left, meanwhile.
             if not user.banned_until or user.banned_until <= now:
+                db.rollback()
+                continue
+            # Re-check under lock: if an offer was concurrently assigned (or
+            # cleared) since the optimistic read that decided whether to lock a
+            # CHARGING_PORTS row, `port` no longer reflects the entry's actual
+            # offer state. Rolling back and letting the next sweep pick this
+            # entry back up avoids deleting it without promoting/releasing the
+            # port it now actually holds an offer on.
+            if entry.offered_port_id != optimistic.offered_port_id:
                 db.rollback()
                 continue
 
