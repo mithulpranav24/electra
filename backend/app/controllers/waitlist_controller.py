@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, verify_not_banned
 from app.models.user import User
 from app.schemas.reservation_schema import ReservationResponse
 from app.schemas.waitlist_schema import WaitlistJoinRequest, WaitlistStatusResponse
@@ -36,7 +36,7 @@ def join_waitlist(
     request: WaitlistJoinRequest,
     fastapi_req: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(verify_not_banned),
 ):
     if current_user.role != "Driver":
         raise HTTPException(status_code=403, detail="Only drivers can join a waitlist")
@@ -73,7 +73,7 @@ def confirm_waitlist_offer(
     waitlist_id: str,
     fastapi_req: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(verify_not_banned),
 ):
     ip_address = fastapi_req.client.host if fastapi_req.client else "unknown"
     return WaitlistService.confirm_offer(db, current_user, waitlist_id, ip_address)
