@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, verify_not_banned
 from app.models.user import User
 from app.models.station import Station, ChargingPort
 from app.models.reservation import Reservation
@@ -104,7 +104,7 @@ def create_reservation(
     request: ReservationCreate,
     fastapi_req: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(verify_not_banned)
 ):
     clean_expired_reservations(db)
 

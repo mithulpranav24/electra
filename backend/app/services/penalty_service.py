@@ -46,6 +46,10 @@ class PenaltyService:
             db.query(Penalty).filter(Penalty.user_id == user.user_id, Penalty.is_served.is_(False)).update(
                 {"is_served": True}, synchronize_session=False
             )
+            # The bulk update above bypasses the ORM session, so the in-memory
+            # `penalty` instance (added earlier in this same call) is left with
+            # its original is_served=False unless corrected here explicitly.
+            penalty.is_served = True
             log_audit_event(
                 db,
                 user_id=user.user_id,
