@@ -105,11 +105,16 @@ class ReportService:
             .scalar()
         )
 
+        revenue_since = now - timedelta(days=REVENUE_TREND_DAYS)
         revenue_total = (
             db.query(func.coalesce(func.sum(Invoice.total_amount), 0))
             .join(ChargingSession, Invoice.charging_session_id == ChargingSession.session_id)
             .join(Reservation, ChargingSession.reservation_id == Reservation.reservation_id)
-            .filter(Reservation.port_id.in_(port_ids_subq), Invoice.is_paid.is_(True))
+            .filter(
+                Reservation.port_id.in_(port_ids_subq),
+                Invoice.is_paid.is_(True),
+                Invoice.created_at >= revenue_since,
+            )
             .scalar()
         )
 
