@@ -31,6 +31,17 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.session_tasks.auto_terminate_stale_sessions",
         "schedule": 60.0,
     },
+    # FR-21 "Overstay Penalty Enforcer": 1 point once idle time crosses the
+    # 30-minute grace period after target_reached.
+    "enforce-overstay-penalties": {
+        "task": "app.workers.session_tasks.enforce_overstay_penalties",
+        "schedule": 15.0,
+    },
+    # FR-21: asynchronously clear a newly-banned user's own WAITLIST entry.
+    "clear-waitlist-for-banned-users": {
+        "task": "app.workers.waitlist_tasks.clear_waitlist_for_banned_users",
+        "schedule": 15.0,
+    },
 }
 
 # celery_app.autodiscover_tasks() only imports a module literally named

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
@@ -8,6 +8,9 @@ from app.services.station_service import StationService
 from app.models.user import User
 
 router = APIRouter()
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 @router.post("/company/{company_id}", response_model=StationResponse)
 def create_station(company_id: str, station_in: StationCreate, db: Session = Depends(get_db), current_user: User = Depends(require_operator)):
@@ -21,8 +24,8 @@ def get_stations(company_id: str, db: Session = Depends(get_db), current_user: U
     return StationService.get_stations_for_company(db, company_id)
 
 @router.put("/{station_id}", response_model=StationResponse)
-def update_station(station_id: str, station_in: StationUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_operator)):
-    return StationService.update_station(db, str(current_user.user_id), station_id, station_in)
+def update_station(station_id: str, station_in: StationUpdate, request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_operator)):
+    return StationService.update_station(db, str(current_user.user_id), station_id, station_in, _client_ip(request))
 
 @router.delete("/{station_id}")
 def delete_station(station_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_operator)):
@@ -34,8 +37,8 @@ def create_port(station_id: str, port_in: ChargingPortCreate, db: Session = Depe
     return StationService.create_port(db, str(current_user.user_id), station_id, port_in)
 
 @router.put("/ports/{port_id}", response_model=ChargingPortResponse)
-def update_port(port_id: str, port_in: ChargingPortUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_operator)):
-    return StationService.update_port(db, str(current_user.user_id), port_id, port_in)
+def update_port(port_id: str, port_in: ChargingPortUpdate, request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_operator)):
+    return StationService.update_port(db, str(current_user.user_id), port_id, port_in, _client_ip(request))
 
 @router.delete("/ports/{port_id}")
 def delete_port(port_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_operator)):

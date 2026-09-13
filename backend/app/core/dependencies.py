@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -38,12 +40,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
-        
-    if user.banned_until:
-        from datetime import datetime, timezone
-        if user.banned_until.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
-            raise HTTPException(status_code=403, detail="User is banned")
-        
+
     return user
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
@@ -54,4 +51,15 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
 def require_operator(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role not in ["Operator", "Admin"]:
         raise HTTPException(status_code=403, detail="Not enough permissions. Operator role required.")
+    return current_user
+
+def verify_not_banned(current_user: User = Depends(get_current_user)) -> User:
+    """FR-21: a 24-hour ban only prohibits making new reservations or joining
+    new waitlists - it must not lock a banned user out of unrelated actions
+    like stopping an in-progress session or paying an invoice. sp_CreateReservation,
+    sp_JoinWaitlist, and sp_ConfirmWaitlist already re-enforce this ban at the
+    database layer; this dependency exists purely so booking/waitlist endpoints
+    can fail fast without a round trip."""
+    if current_user.banned_until and current_user.banned_until.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+        raise HTTPException(status_code=403, detail="User is banned")
     return current_user

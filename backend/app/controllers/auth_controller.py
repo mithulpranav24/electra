@@ -6,6 +6,7 @@ from app.core.security import create_access_token, revoke_token, redis_client
 from app.schemas.auth import Token
 from app.schemas.user import UserCreate, UserResponse
 from app.services.auth_service import AuthService
+from app.services.audit_service import log_audit_event
 from app.core.dependencies import get_current_user, oauth2_scheme
 from app.models.user import User
 import jwt
@@ -59,16 +60,34 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
     
     access_token = create_access_token(data={"user_id": str(user.user_id), "role": user.role})
+    log_audit_event(
+        db,
+        user_id=user.user_id,
+        action="Login",
+        entity_type="USERS",
+        entity_id=user.user_id,
+        ip_address=request.client.host if request.client else "unknown",
+    )
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/logout")
-def logout(token: str = Depends(oauth2_scheme)):
+def logout(request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
         jti = payload.get("jti")
         exp = payload.get("exp")
+        user_id = payload.get("user_id")
         if jti and exp:
             revoke_token(jti, exp)
+        if user_id:
+            log_audit_event(
+                db,
+                user_id=user_id,
+                action="Logout",
+                entity_type="USERS",
+                entity_id=user_id,
+                ip_address=request.client.host if request.client else "unknown",
+            )
     except jwt.InvalidTokenError:
         pass
     return {"message": "Successfully logged out"}

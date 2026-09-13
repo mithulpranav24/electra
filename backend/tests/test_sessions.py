@@ -156,3 +156,147 @@ class TestChargingCurveMath:
         station = Station(minimum_session_fee=Decimal("50.00"))
         # GREATEST(50.00, 10% * 40kWh * 15.50) = GREATEST(50.00, 62.00) = 62.00
         assert compute_secondary_hold(session, vehicle, station) == Decimal("62.00")
+
+
+class _RecordingQuery:
+    """Like the _AlwaysNoneQuery pattern above, but returns a configured
+    terminal value and records every chained call (with its args/kwargs) so
+    tests can assert on lock modes (with_for_update(read=True, of=...)) and
+    call order, not just the final returned value."""
+
+    def __init__(self, terminal, value):
+        self._terminal = terminal
+        self._value = value
+        self.calls = {}
+
+    def __getattr__(self, name):
+        if name == self._terminal:
+            return lambda *a, **k: self._value
+
+        def _chain(*a, **k):
+            self.calls.setdefault(name, []).append((a, k))
+            return self
+
+        return _chain
+
+
+class TestEnforceOverstayPenaltiesClosurePause:
+    """FR-21 / Architecture.md 3.4: while a station's gate is locked, the
+    driver cannot physically retrieve their vehicle, so that time must not
+    count toward the 30-minute idle grace period."""
+
+    def _base_objects(self, now, locked_gate, locked_gate_at, cumulative_closure_seconds=0):
+        import uuid
+        from datetime import timedelta
+
+        from app.models.reservation import Reservation
+        from app.models.session import ChargingSession
+        from app.models.station import ChargingPort, Station
+        from app.models.user import User
+        from app.models.vehicle import Vehicle
+
+        session_id = uuid.uuid4()
+        reservation_id = uuid.uuid4()
+        port_id = uuid.uuid4()
+        station_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+
+        # 40kWh battery, 50kW ("dc fast") port, 20% -> 100% takes 76.8 minutes
+        # (matches TestChargingCurveMath.test_minutes_to_reach_target_full_and_throttled_segments).
+        minutes_to_target = Decimal("76.8")
+        start_time = now - timedelta(minutes=float(minutes_to_target) + 40)
+
+        session = ChargingSession(
+            session_id=session_id,
+            reservation_id=reservation_id,
+            initial_battery_percentage=Decimal("20"),
+            target_battery_percentage=Decimal("100"),
+            applied_tariff=Decimal("15.50"),
+            start_time=start_time,
+            end_time=None,
+            is_overstay_penalized=False,
+            cumulative_closure_seconds=cumulative_closure_seconds,
+        )
+        reservation = Reservation(reservation_id=reservation_id, port_id=port_id, vehicle_id=uuid.uuid4(), user_id=user_id)
+        port = ChargingPort(port_id=port_id, station_id=station_id, charger_type="dc fast")
+        vehicle = Vehicle(battery_capacity=Decimal("40"))
+        station = Station(station_id=station_id, locked_gate=locked_gate, locked_gate_at=locked_gate_at)
+        user = User(user_id=user_id)
+
+        return session_id, session, reservation, port, vehicle, station, user
+
+    def test_no_penalty_while_gate_currently_locked_since_idle_start(self):
+        """40 minutes of wall-clock idle time, but the gate has been locked
+        for all 40 of those minutes (locked exactly when charging finished) -
+        none of it should count, so no penalty is applied."""
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import MagicMock
+
+        from app.services.session_service import SessionService
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        idle_start = now - timedelta(minutes=40)
+        session_id, session, reservation, port, vehicle, station, user = self._base_objects(
+            now, locked_gate=True, locked_gate_at=idle_start
+        )
+
+        db = MagicMock()
+        db.query.side_effect = [
+            _RecordingQuery("all", [(session_id,)]),  # candidate_ids
+            _RecordingQuery("first", session),  # optimistic
+            _RecordingQuery("first", reservation),
+            _RecordingQuery("first", port),
+            _RecordingQuery("first", vehicle),
+            _RecordingQuery("first", station),  # station_optimistic - gate locked -> should stop here
+        ]
+
+        result = SessionService.enforce_overstay_penalties(db)
+
+        assert result == 0
+        assert session.is_overstay_penalized is False
+        # Only the 6 optimistic-read queries above should have run - no locks acquired.
+        assert db.query.call_count == 6
+
+    def test_penalty_still_applies_once_open_station_time_exceeds_grace(self):
+        """The gate is currently open (not locked) and 40 minutes of idle
+        time have genuinely elapsed with the station open the whole time -
+        the overstay penalty must still fire."""
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock, patch
+
+        from app.models.station import ChargingPort, Station
+        from app.models.user import User
+        from app.services.session_service import SessionService
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        session_id, session, reservation, port, vehicle, station, user = self._base_objects(
+            now, locked_gate=False, locked_gate_at=None
+        )
+
+        db = MagicMock()
+        db.query.side_effect = [
+            _RecordingQuery("all", [(session_id,)]),  # candidate_ids
+            _RecordingQuery("first", session),  # optimistic
+            _RecordingQuery("first", reservation),
+            _RecordingQuery("first", port),
+            _RecordingQuery("first", vehicle),
+            _RecordingQuery("first", station),  # station_optimistic
+            (tier1 := _RecordingQuery("first", station)),  # Tier 1: STATIONS FOR SHARE
+            (tier2 := _RecordingQuery("first", port)),  # Tier 2: CHARGING_PORTS FOR SHARE
+            _RecordingQuery("first", user),  # Tier 3: USERS FOR UPDATE
+            _RecordingQuery("first", session),  # Tier 6: CHARGING_SESSIONS FOR UPDATE
+        ]
+
+        with patch("app.services.session_service.PenaltyService.assign_penalty_point") as mock_assign:
+            result = SessionService.enforce_overstay_penalties(db)
+
+        assert result == 1
+        assert session.is_overstay_penalized is True
+        mock_assign.assert_called_once_with(db, user, "Overstay After Charging Complete")
+
+        # Global lock hierarchy (Architecture.md 3.5): Tier 1 STATIONS FOR SHARE
+        # before Tier 2 CHARGING_PORTS FOR SHARE before Tier 3/6.
+        assert tier1.calls["with_for_update"] == [((), {"read": True, "of": Station})]
+        assert tier2.calls["with_for_update"] == [((), {"read": True, "of": ChargingPort})]
+        locked_models = [args[0] for args, _ in db.query.call_args_list[6:10]]
+        assert locked_models == [Station, ChargingPort, User, session.__class__]
