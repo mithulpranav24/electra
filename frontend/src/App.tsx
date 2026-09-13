@@ -17,7 +17,9 @@ const SearchStations = lazy(async () => ({ default: (await import('./pages/drive
 const StationDetails = lazy(async () => ({ default: (await import('./pages/driver/StationDetails')).StationDetails }));
 const Sessions = lazy(() => import('./pages/driver/Sessions'));
 const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
+const AdminReports = lazy(() => import('./pages/admin/Reports'));
 const OperatorDashboard = lazy(() => import('./pages/operator/Dashboard'));
+const OperatorReports = lazy(() => import('./pages/operator/Reports'));
 
 function GlobalLoader() {
   return (
@@ -79,12 +81,14 @@ export default function App() {
             <Route path="/operator" element={<RoleProtectedRoute allowedRole="Operator"><AppShell /></RoleProtectedRoute>}>
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<OperatorDashboard />} />
+              <Route path="reports" element={<OperatorReports />} />
               <Route path="*" element={<Navigate to="dashboard" replace />} />
             </Route>
 
             <Route path="/admin" element={<RoleProtectedRoute allowedRole="Admin"><AppShell /></RoleProtectedRoute>}>
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<AdminDashboard />} />
+              <Route path="reports" element={<AdminReports />} />
               <Route path="*" element={<Navigate to="dashboard" replace />} />
             </Route>
 

@@ -171,3 +171,31 @@ export interface DriverDashboardData {
   energy_charged_kwh?: number;
   recent_activity?: Array<{ id: string; location: string; date: string; amount: string; status: string }>;
 }
+
+export interface RevenueByDay {
+  date: string;
+  revenue: number;
+}
+
+export interface AdminReport {
+  total_users: number;
+  total_companies: number;
+  total_stations: number;
+  revenue_by_day: RevenueByDay[];
+  system_activity_24h: number;
+  top_actions: Array<{ action: string; count: number }>;
+  active_sessions: number;
+  reservations_today: number;
+  most_popular_stations: Array<{ station_id: string; name: string; session_count: number }>;
+}
+
+export interface OperatorReport {
+  todays_reservations: number;
+  active_sessions: number;
+  revenue: number;
+  revenue_by_day: RevenueByDay[];
+  charger_utilization_pct: number;
+  maintenance_alerts: number;
+  peak_hours: Array<{ hour: number; count: number }>;
+  queue_statistics: Array<{ station_id: string; name: string; queue_length: number }>;
+}

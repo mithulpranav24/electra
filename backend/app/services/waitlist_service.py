@@ -6,13 +6,14 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
-from app.models.audit import AuditLog
 from app.models.reservation import Reservation
 from app.models.session import ChargingSession
 from app.models.station import ChargingPort, Station
 from app.models.transient import Waitlist, WaitlistRejection
 from app.models.user import User
 from app.models.vehicle import Vehicle
+from app.services.audit_service import log_audit_event
+from app.services.penalty_service import PenaltyService
 
 ESCROW_AMOUNT = Decimal("1000.00")
 OFFER_WINDOW_SECONDS = 90
@@ -211,15 +212,15 @@ class WaitlistService:
         if not new_entry:
             raise HTTPException(status_code=500, detail="Failed to retrieve created waitlist entry")
 
-        db.add(AuditLog(
+        log_audit_event(
+            db,
             user_id=current_user.user_id,
             action="Waitlist Joined",
             entity_type="WAITLIST",
             entity_id=new_entry.waitlist_id,
             details={"station_id": str(request.station_id), "vehicle_id": str(request.vehicle_id)},
             ip_address=str(ip_address),
-        ))
-        db.commit()
+        )
         return new_entry
 
     @staticmethod
@@ -269,17 +270,23 @@ class WaitlistService:
         db.delete(entry)
 
         if port is not None and port.status == "Pending Waitlist":
+            # Architecture.md 3.3.3 Rule 7: leaving while holding an active offer
+            # is processed as an ignored offer (1 penalty point), even though the
+            # entry itself is removed rather than left for the offer to expire.
+            PenaltyService.assign_penalty_point(db, current_user, "Ignored Waitlist Offer")
             candidate = WaitlistService.find_candidate_waitlist_entry(db, entry.station_id, port.connector_type, port.port_id)
             WaitlistService.apply_promotion_or_release(db, port, candidate)
 
-        db.add(AuditLog(
+        log_audit_event(
+            db,
             user_id=current_user.user_id,
             action="Waitlist Left",
             entity_type="WAITLIST",
             entity_id=entry.waitlist_id,
             details={"station_id": str(entry.station_id)},
             ip_address=str(ip_address),
-        ))
+            commit=False,
+        )
         db.commit()
 
     # ------------------------------------------------------------------
@@ -344,15 +351,15 @@ class WaitlistService:
         if not new_res:
             raise HTTPException(status_code=500, detail="Failed to retrieve created reservation")
 
-        db.add(AuditLog(
+        log_audit_event(
+            db,
             user_id=current_user.user_id,
             action="Waitlist Offer Confirmed",
             entity_type="RESERVATIONS",
             entity_id=new_res.reservation_id,
             details={"port_id": str(offered_port_id), "waitlist_id": str(waitlist_id)},
             ip_address=str(ip_address),
-        ))
-        db.commit()
+        )
         return new_res
 
     # ------------------------------------------------------------------
@@ -394,11 +401,11 @@ class WaitlistService:
             # Tier 2: CHARGING_PORTS
             port = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == optimistic.offered_port_id).first()
             # Tier 3: USERS
-            db.query(User).with_for_update().filter(User.user_id == optimistic.user_id).first()
+            user = db.query(User).with_for_update().filter(User.user_id == optimistic.user_id).first()
             # Tier 3.5: WAITLIST
             entry = db.query(Waitlist).with_for_update().filter(Waitlist.waitlist_id == waitlist_id).first()
 
-            if not entry or not port:
+            if not entry or not port or not user:
                 db.rollback()
                 continue
             # Re-check under lock: another request may have confirmed/left in the meantime.
@@ -410,15 +417,101 @@ class WaitlistService:
             candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
             WaitlistService.apply_promotion_or_release(db, port, candidate)
 
-            db.add(AuditLog(
+            # FR-21: ignoring a waitlist offer costs 1 penalty point.
+            PenaltyService.assign_penalty_point(db, user, "Ignored Waitlist Offer")
+
+            log_audit_event(
+                db,
                 user_id=entry.user_id,
                 action="Waitlist Offer Expired",
                 entity_type="WAITLIST",
                 entity_id=entry.waitlist_id,
                 details={"port_id": str(port.port_id)},
                 ip_address="system",
-            ))
+                commit=False,
+            )
             db.commit()
             expired_count += 1
 
         return expired_count
+
+    # ------------------------------------------------------------------
+    # Background worker entry point (FR-21: async ban-triggered clearance)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def clear_waitlist_for_banned_users(db: Session) -> int:
+        """FR-21: a 24-hour ban must clear the user's own active WAITLIST
+        entry, but PenaltyService.assign_penalty_point cannot do that itself -
+        by the time a ban is applied it already holds a Tier 3 USERS lock,
+        and locking this entry's STATIONS/CHARGING_PORTS (Tiers 1-2) after
+        that would invert the global lock hierarchy and risk deadlock. This
+        periodic sweep instead starts fresh (no locks held yet) for each
+        banned user still holding a WAITLIST row, so it can acquire locks
+        top-down in the normal order.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        stale_ids = [
+            row[0]
+            for row in db.query(Waitlist.waitlist_id)
+            .join(User, Waitlist.user_id == User.user_id)
+            .filter(User.banned_until.isnot(None), User.banned_until > now)
+            .order_by(Waitlist.waitlist_id.asc())
+            .all()
+        ]
+
+        cleared = 0
+        for waitlist_id in stale_ids:
+            optimistic = db.query(Waitlist).filter(Waitlist.waitlist_id == waitlist_id).first()
+            if not optimistic:
+                continue
+
+            # Tier 1: STATIONS FOR SHARE (read-only validation, no station-wide change)
+            db.query(Station).with_for_update(read=True, of=Station).filter(
+                Station.station_id == optimistic.station_id
+            ).first()
+            # Tier 2: CHARGING_PORTS (only if this entry currently holds an offer)
+            port = None
+            if optimistic.offered_port_id:
+                port = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == optimistic.offered_port_id).first()
+            # Tier 3: USERS
+            user = db.query(User).with_for_update().filter(User.user_id == optimistic.user_id).first()
+            # Tier 3.5: WAITLIST
+            entry = db.query(Waitlist).with_for_update().filter(Waitlist.waitlist_id == waitlist_id).first()
+
+            if not entry or not user:
+                db.rollback()
+                continue
+            # Re-check under lock: the ban may have been lifted, or the entry already left, meanwhile.
+            if not user.banned_until or user.banned_until <= now:
+                db.rollback()
+                continue
+            # Re-check under lock: if an offer was concurrently assigned (or
+            # cleared) since the optimistic read that decided whether to lock a
+            # CHARGING_PORTS row, `port` no longer reflects the entry's actual
+            # offer state. Rolling back and letting the next sweep pick this
+            # entry back up avoids deleting it without promoting/releasing the
+            # port it now actually holds an offer on.
+            if entry.offered_port_id != optimistic.offered_port_id:
+                db.rollback()
+                continue
+
+            db.delete(entry)
+            if port is not None and port.status == "Pending Waitlist":
+                candidate = WaitlistService.find_candidate_waitlist_entry(db, entry.station_id, port.connector_type, port.port_id)
+                WaitlistService.apply_promotion_or_release(db, port, candidate)
+
+            log_audit_event(
+                db,
+                user_id=entry.user_id,
+                action="Waitlist Entry Removed (Ban)",
+                entity_type="WAITLIST",
+                entity_id=entry.waitlist_id,
+                details={"station_id": str(entry.station_id), "banned_until": user.banned_until.isoformat()},
+                ip_address="system",
+                commit=False,
+            )
+            db.commit()
+            cleared += 1
+
+        return cleared

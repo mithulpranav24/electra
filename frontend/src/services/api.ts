@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
+  AdminReport,
   AuthResponse,
   ChargingPort,
   ChargingSessionStatus,
@@ -9,6 +10,7 @@ import type {
   DriverDashboardData,
   Favorite,
   Invoice,
+  OperatorReport,
   PaymentMethod,
   Reservation,
   Station,
@@ -148,6 +150,17 @@ export const adminService = {
   },
   assignOperator: async (companyId: string, userId: string): Promise<CompanyMembership> => {
     const { data } = await api.post<CompanyMembership>('/admin/companies/memberships', { company_id: companyId, user_id: userId });
+    return data;
+  },
+};
+
+export const reportService = {
+  getAdminReport: async (): Promise<AdminReport> => {
+    const { data } = await api.get<AdminReport>('/reports/admin');
+    return data;
+  },
+  getOperatorReport: async (companyId: string): Promise<OperatorReport> => {
+    const { data } = await api.get<OperatorReport>(`/reports/operator/${companyId}`);
     return data;
   },
 };
