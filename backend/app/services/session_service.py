@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.invoice import Invoice
+from app.models.maintenance import MaintenanceSchedule
 from app.models.reservation import Reservation
 from app.models.session import ChargingSession
 from app.models.station import ChargingPort, Station
@@ -15,6 +16,7 @@ from app.models.user import User
 from app.models.vehicle import Vehicle
 from app.models.wallet import WalletTransaction
 from app.services.audit_service import log_audit_event
+from app.services.notification_service import create_notification
 from app.services.penalty_service import PenaltyService
 from app.services.waitlist_service import WaitlistService
 
@@ -270,11 +272,31 @@ class SessionService:
         extra_penalty: Decimal = Decimal("0.00"),
         port_goes_offline: bool = False,
         ip_address: str = "system",
+        waive_minimum_fee: bool = False,
+        force_port_status: Optional[str] = None,
+        notify: bool = True,
     ) -> Invoice:
-        """DD-10 Session Termination Service, shared by manual stop and the
-        24-hour auto-termination worker. Caller must already hold STATIONS FOR
-        SHARE -> CHARGING_PORTS FOR UPDATE -> VEHICLES FOR SHARE -> USERS FOR
-        UPDATE -> RESERVATIONS FOR UPDATE -> CHARGING_SESSIONS FOR UPDATE.
+        """DD-10 Session Termination Service, shared by manual stop, the
+        24-hour auto-termination worker, and (via force_port_status /
+        waive_minimum_fee) FR-27's immediate-maintenance forced termination.
+        Caller must already hold STATIONS FOR SHARE -> CHARGING_PORTS FOR
+        UPDATE -> VEHICLES FOR SHARE -> USERS FOR UPDATE -> RESERVATIONS FOR
+        UPDATE -> CHARGING_SESSIONS FOR UPDATE.
+
+        waive_minimum_fee=True bills strictly the raw energy cost (no
+        minimum_session_fee floor, no idle fee) per FR-27 - maintenance is not
+        the driver's fault, so neither the minimum-fee floor nor an idle
+        penalty should apply to a session cut short for it.
+
+        force_port_status, when set, skips both the "Offline" and waitlist-
+        promotion branches below and assigns the port that status directly
+        (used to send it straight to "Maintenance" instead of back into the
+        waitlist rotation).
+
+        notify=False suppresses the generic "Charging completion" / "Invoice
+        generation" notifications below - callers with a more specific message
+        for this exact termination (e.g. MaintenanceService's forced stop)
+        send their own instead, to avoid double-notifying the driver.
 
         USERS.wallet_balance is a derived cache maintained by the DB trigger
         trg_update_wallet_balance as SUM(WALLET_TRANSACTIONS) for the user - it
@@ -291,7 +313,7 @@ class SessionService:
         outgrew what was pre-authorized specifically for it.
         """
         snapshot = compute_snapshot(session, vehicle, port, station, at_time)
-        session_cost = snapshot["total_cost"]
+        session_cost = snapshot["energy_cost"] if waive_minimum_fee else snapshot["total_cost"]
         total_due = _money(session_cost + extra_penalty)
 
         secondary_hold = compute_secondary_hold(session, vehicle, station)
@@ -325,8 +347,26 @@ class SessionService:
 
         reservation.status = "Completed"
 
-        if port_goes_offline:
+        if force_port_status:
+            port.status = force_port_status
+            port.is_pending_maintenance = False
+        elif port_goes_offline:
             port.status = "Offline"
+        elif port.is_pending_maintenance:
+            # FR-27: a maintenance window was scheduled for while this port was
+            # still Charging (is_pending_maintenance=True, new reservations
+            # already blocked) - now that the session has ended naturally, the
+            # port goes straight to Maintenance instead of back into rotation.
+            port.status = "Maintenance"
+            port.is_pending_maintenance = False
+            schedule = (
+                db.query(MaintenanceSchedule)
+                .filter(MaintenanceSchedule.port_id == port.port_id, MaintenanceSchedule.status == "Scheduled")
+                .order_by(MaintenanceSchedule.start_time.asc())
+                .first()
+            )
+            if schedule:
+                schedule.status = "Active"
         else:
             candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
             WaitlistService.apply_promotion_or_release(db, port, candidate)
@@ -355,6 +395,18 @@ class SessionService:
             ip_address=str(ip_address),
             commit=False,
         )
+
+        if notify:
+            create_notification(db, user.user_id, "Charging session complete", "Your charging session has ended.", commit=False)
+            create_notification(
+                db,
+                user.user_id,
+                "Invoice generated",
+                f"An invoice for {total_due} has been generated for your session."
+                + ("" if is_paid else " Your wallet balance was insufficient to cover it in full."),
+                commit=False,
+            )
+
         return invoice
 
     @staticmethod

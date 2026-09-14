@@ -42,6 +42,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.waitlist_tasks.clear_waitlist_for_banned_users",
         "schedule": 15.0,
     },
+    # FR-27 "Scheduled Maintenance Trigger": polls every minute per Architecture.md 3.4.
+    "check-scheduled-maintenance": {
+        "task": "app.workers.maintenance_tasks.check_scheduled_maintenance",
+        "schedule": 60.0,
+    },
 }
 
 # celery_app.autodiscover_tasks() only imports a module literally named
@@ -52,3 +57,4 @@ celery_app.conf.beat_schedule = {
 # their @celery_app.task decorators need it at import time.
 import app.workers.waitlist_tasks  # noqa: E402,F401
 import app.workers.session_tasks  # noqa: E402,F401
+import app.workers.maintenance_tasks  # noqa: E402,F401
