@@ -205,6 +205,7 @@ DECLARE
     v_port_status port_status_enum;
     v_port_connector_type VARCHAR;
     v_port_is_active BOOLEAN;
+    v_port_is_pending_maintenance BOOLEAN;
     v_vehicle_user_id UUID;
     v_vehicle_connector_type VARCHAR;
     v_vehicle_is_active BOOLEAN;
@@ -223,6 +224,7 @@ DECLARE
     v_active_sessions INT;
     v_unpaid_invoices INT;
     v_waitlist_offer INT;
+    v_imminent_maintenance INT;
     v_deleted_waitlist_row WAITLIST%ROWTYPE;
     v_new_reservation_id UUID;
 BEGIN
@@ -242,7 +244,7 @@ BEGIN
     FROM STATIONS WHERE station_id = v_station_id FOR SHARE;
 
     -- Tier 2: Charging Ports
-    SELECT status, connector_type, is_active INTO v_port_status, v_port_connector_type, v_port_is_active 
+    SELECT status, connector_type, is_active, is_pending_maintenance INTO v_port_status, v_port_connector_type, v_port_is_active, v_port_is_pending_maintenance
     FROM CHARGING_PORTS WHERE port_id = p_port_id FOR UPDATE;
 
     -- Tier 2.5: Vehicles
@@ -258,12 +260,19 @@ BEGIN
     IF v_company_is_active = FALSE OR v_company_is_deprecating = TRUE THEN RAISE EXCEPTION 'Company is inactive or deprecating'; END IF;
     IF v_station_is_active = FALSE THEN RAISE EXCEPTION 'Station is inactive'; END IF;
     IF v_port_is_active = FALSE THEN RAISE EXCEPTION 'Port is inactive'; END IF;
+    IF v_port_is_pending_maintenance = TRUE THEN RAISE EXCEPTION 'Port is pending maintenance'; END IF;
     IF v_vehicle_is_active = FALSE THEN RAISE EXCEPTION 'Vehicle is inactive'; END IF;
     IF v_user_is_active = FALSE THEN RAISE EXCEPTION 'User is inactive'; END IF;
     IF v_user_is_suspended = TRUE THEN RAISE EXCEPTION 'User is suspended'; END IF;
     IF v_vehicle_user_id != p_user_id THEN RAISE EXCEPTION 'Vehicle does not belong to user'; END IF;
     IF v_vehicle_connector_type != v_port_connector_type THEN RAISE EXCEPTION 'Connector mismatch'; END IF;
     IF v_user_banned_until IS NOT NULL AND v_user_banned_until > CURRENT_TIMESTAMP THEN RAISE EXCEPTION 'User is banned'; END IF;
+
+    -- FR-27: block new reservations whose 15-minute check-in grace period
+    -- would intersect an already-scheduled maintenance window for this port.
+    SELECT COUNT(*) INTO v_imminent_maintenance FROM MAINTENANCE_SCHEDULES
+    WHERE port_id = p_port_id AND status = 'Scheduled' AND start_time < CURRENT_TIMESTAMP + (p_grace_period_minutes || ' minutes')::INTERVAL;
+    IF v_imminent_maintenance > 0 THEN RAISE EXCEPTION 'Port has scheduled maintenance beginning within the reservation grace period'; END IF;
 
     -- Financial / State Validations
     SELECT COUNT(*) INTO v_active_reservations FROM RESERVATIONS WHERE user_id = p_user_id AND status IN ('Confirmed', 'Active');
