@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3,
+  Bell,
   Building2,
   Car,
   CircleUserRound,
@@ -15,8 +17,11 @@ import {
 import { useAuth } from '../context/auth-context';
 import type { UserRole } from '../types';
 import { formatCurrency } from '../lib/format';
+import { notificationService } from '../services/api';
 import { BrandMark } from './BrandMark';
 import { Button } from '../ui/Button';
+
+const UNREAD_POLL_MS = 30_000;
 
 interface NavigationItem {
   to: string;
@@ -33,15 +38,18 @@ const navigation: Record<UserRole, NavigationItem[]> = {
     { to: '/driver/sessions', label: 'Activity', icon: Zap, mobile: true },
     { to: '/driver/vehicles', label: 'Vehicles', icon: Car, mobile: true },
     { to: '/driver/wallet', label: 'Wallet & billing', shortLabel: 'Wallet', icon: Wallet, mobile: true },
+    { to: '/driver/notifications', label: 'Notifications', icon: Bell },
     { to: '/driver/profile', label: 'Account', icon: CircleUserRound },
   ],
   Operator: [
     { to: '/operator/dashboard', label: 'Station operations', shortLabel: 'Operations', icon: MapPinned, mobile: true },
     { to: '/operator/reports', label: 'Reports', icon: BarChart3, mobile: true },
+    { to: '/operator/notifications', label: 'Notifications', icon: Bell, mobile: true },
   ],
   Admin: [
     { to: '/admin/dashboard', label: 'Organization control', shortLabel: 'Organizations', icon: Building2, mobile: true },
     { to: '/admin/reports', label: 'Reports', icon: BarChart3, mobile: true },
+    { to: '/admin/notifications', label: 'Notifications', icon: Bell, mobile: true },
   ],
 };
 
@@ -57,6 +65,23 @@ export function AppShell() {
   const role = user?.role ?? 'Driver';
   const items = navigation[role];
   const firstName = user?.full_name?.trim().split(/\s+/)[0] || 'there';
+  const [unreadCount, setUnreadCount] = useState(0);
+  const isOnNotificationsPage = location.pathname.endsWith('/notifications');
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const count = await notificationService.getUnreadCount();
+        if (!cancelled) setUnreadCount(count);
+      } catch {
+        // Notifications are a non-critical affordance - a failed poll just leaves the last-known badge.
+      }
+    };
+    void poll();
+    const interval = setInterval(() => void poll(), UNREAD_POLL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isOnNotificationsPage]);
 
   const handleLogout = async () => {
     await logout();
@@ -78,6 +103,7 @@ export function AppShell() {
             {items.map((item) => {
               const Icon = item.icon;
               const active = isItemActive(location.pathname, item);
+              const isNotifications = item.to.endsWith('/notifications');
               return (
                 <NavLink
                   key={item.to}
@@ -87,6 +113,7 @@ export function AppShell() {
                 >
                   <span className={`relative z-10 flex size-7 items-center justify-center rounded-full ${active ? 'bg-[var(--amber)] text-[var(--night)]' : 'bg-[var(--night-raised)] text-white/70 group-hover:text-white'}`}>
                     <Icon size={16} strokeWidth={2.25} />
+                    {isNotifications && unreadCount > 0 && <span className="absolute -right-0.5 -top-0.5 flex size-3.5 items-center justify-center rounded-full bg-[var(--red)] text-[0.55rem] font-extrabold text-white">{unreadCount > 9 ? '9+' : unreadCount}</span>}
                   </span>
                   <span>{item.label}</span>
                 </NavLink>
@@ -118,6 +145,12 @@ export function AppShell() {
           <BrandMark />
           <div className="flex items-center gap-2">
             {role === 'Driver' && <NavLink to="/driver/wallet" className="font-data rounded-full bg-[var(--amber-soft)] px-3 py-1.5 text-xs font-bold text-[#65470a]">{formatCurrency(user?.wallet_balance ?? 0, 0)}</NavLink>}
+            {role === 'Driver' && (
+              <NavLink to="/driver/notifications" className="relative flex size-10 items-center justify-center rounded-full border border-[var(--line)] bg-white" aria-label="Notifications">
+                <Bell size={19} />
+                {unreadCount > 0 && <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-[var(--red)] text-[0.6rem] font-extrabold text-white">{unreadCount > 9 ? '9+' : unreadCount}</span>}
+              </NavLink>
+            )}
             {role === 'Driver' ? (
               <NavLink to="/driver/profile" className="flex size-10 items-center justify-center rounded-full border border-[var(--line)] bg-white" aria-label="Open account"><CircleUserRound size={20} /></NavLink>
             ) : (
@@ -135,9 +168,11 @@ export function AppShell() {
             {items.filter((item) => item.mobile).map((item) => {
               const Icon = item.icon;
               const active = isItemActive(location.pathname, item);
+              const isNotifications = item.to.endsWith('/notifications');
               return (
-                <NavLink key={item.to} to={item.to} className={`flex min-h-14 min-w-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-[0.66rem] font-bold transition ${active ? 'text-[var(--teal-dark)]' : 'text-[var(--steel)]'}`} aria-current={active ? 'page' : undefined}>
+                <NavLink key={item.to} to={item.to} className={`relative flex min-h-14 min-w-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-[0.66rem] font-bold transition ${active ? 'text-[var(--teal-dark)]' : 'text-[var(--steel)]'}`} aria-current={active ? 'page' : undefined}>
                   <Icon size={20} strokeWidth={active ? 2.5 : 2} />
+                  {isNotifications && unreadCount > 0 && <span className="absolute right-2.5 top-1.5 flex size-3.5 items-center justify-center rounded-full bg-[var(--red)] text-[0.55rem] font-extrabold text-white">{unreadCount > 9 ? '9+' : unreadCount}</span>}
                   <span className="max-w-full truncate">{item.shortLabel ?? item.label}</span>
                 </NavLink>
               );

@@ -10,10 +10,14 @@ import type {
   DriverDashboardData,
   Favorite,
   Invoice,
+  MaintenanceSchedule,
+  Notification,
   OperatorReport,
   PaymentMethod,
   Reservation,
+  SearchHistoryEntry,
   Station,
+  StationRatingsResponse,
   User,
   Vehicle,
   WaitlistStatus,
@@ -238,6 +242,13 @@ export const searchService = {
     const { data } = await api.get<Station[]>('/search/recent');
     return data;
   },
+  getHistory: async (): Promise<SearchHistoryEntry[]> => {
+    const { data } = await api.get<SearchHistoryEntry[]>('/search/history');
+    return data;
+  },
+  clearHistory: async (): Promise<void> => {
+    await api.delete('/search/history');
+  },
 };
 
 export const favoriteService = {
@@ -309,6 +320,63 @@ export const invoiceService = {
   },
   payOutstanding: async (): Promise<{ message?: string }> => {
     const { data } = await api.post<{ message?: string }>('/invoices/pay');
+    return data;
+  },
+};
+
+export const notificationService = {
+  list: async (): Promise<Notification[]> => {
+    const { data } = await api.get<Notification[]>('/notifications');
+    return data;
+  },
+  getUnreadCount: async (): Promise<number> => {
+    const { data } = await api.get<{ unread_count: number }>('/notifications/unread-count');
+    return data.unread_count;
+  },
+  markRead: async (notificationId: string): Promise<Notification> => {
+    const { data } = await api.post<Notification>(`/notifications/${notificationId}/read`);
+    return data;
+  },
+  markAllRead: async (): Promise<void> => {
+    await api.post('/notifications/read-all');
+  },
+};
+
+export interface RatingPayload {
+  overall_score: number;
+  cleanliness_score: number;
+  access_score: number;
+  experience_score: number;
+  comment?: string | null;
+}
+
+export const ratingService = {
+  getStationRatings: async (stationId: string): Promise<StationRatingsResponse> => {
+    const { data } = await api.get<StationRatingsResponse>(`/ratings/${stationId}`);
+    return data;
+  },
+  submitRating: async (stationId: string, payload: RatingPayload): Promise<void> => {
+    await api.post(`/ratings/${stationId}`, payload);
+  },
+};
+
+export interface MaintenanceSchedulePayload {
+  port_id: string;
+  start_time: string;
+  end_time: string;
+}
+
+export const maintenanceService = {
+  schedule: async (payload: MaintenanceSchedulePayload): Promise<MaintenanceSchedule> => {
+    const { data } = await api.post<MaintenanceSchedule>('/operator/maintenance', payload);
+    return data;
+  },
+  listForStation: async (stationId: string): Promise<MaintenanceSchedule[]> => {
+    const { data } = await api.get<MaintenanceSchedule[]>(`/operator/maintenance/station/${stationId}`);
+    return data;
+  },
+  complete: async (maintenanceId: string): Promise<MaintenanceSchedule> => {
+    const { data } = await api.post<MaintenanceSchedule>(`/operator/maintenance/${maintenanceId}/complete`);
     return data;
   },
 };
