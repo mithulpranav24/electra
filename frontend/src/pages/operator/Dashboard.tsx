@@ -208,7 +208,7 @@ export default function OperatorDashboard() {
                                     <div className="flex flex-wrap items-center gap-2"><span className="font-bold">{port ? `Port ${port.qr_code}` : shortId(schedule.port_id)}</span><Badge tone={maintenanceTone(schedule.status)}>{schedule.status}</Badge></div>
                                     <p className="mt-0.5 text-xs text-[var(--steel)]">{formatDateTime(schedule.start_time)} – {formatDateTime(schedule.end_time)}</p>
                                   </div>
-                                  {port?.status === 'Maintenance' && (
+                                  {schedule.status === 'Active' && port?.status === 'Maintenance' && (
                                     <Button size="sm" variant="secondary" onClick={() => void handleCompleteMaintenance(station.station_id, schedule.maintenance_id)} isLoading={completingMaintenanceId === schedule.maintenance_id}>Clear bay</Button>
                                   )}
                                 </div>

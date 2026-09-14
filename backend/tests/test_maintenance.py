@@ -59,6 +59,7 @@ def test_schedule_maintenance_future_on_available_port_just_creates_schedule(moc
         _Query("first", station),  # station fetch for permission check
         _Query("first", station),  # Tier 1 STATIONS FOR SHARE
         _Query("first", port),  # Tier 2 CHARGING_PORTS FOR UPDATE
+        _Query("first", None),  # no unresolved schedule already on this port
     ]
 
     schedule = MaintenanceService.schedule_maintenance(
@@ -85,6 +86,7 @@ def test_schedule_maintenance_future_on_charging_port_sets_pending_flag(mock_per
         _Query("first", station),
         _Query("first", station),
         _Query("first", port),
+        _Query("first", None),  # no unresolved schedule already on this port
     ]
 
     MaintenanceService.schedule_maintenance(db, MagicMock(user_id=uuid.uuid4()), _payload(port.port_id, now + timedelta(hours=1)), "127.0.0.1")
@@ -112,6 +114,7 @@ def test_schedule_maintenance_immediate_on_reserved_port_cancels_without_penalty
         _Query("first", station),
         _Query("first", station),  # Tier 1 lock
         _Query("first", port),  # Tier 2 lock
+        _Query("first", None),  # no unresolved schedule already on this port
         _Query("first", reservation),  # reservation lookup inside _cancel_reservation_for_maintenance
     ]
 
@@ -144,6 +147,7 @@ def test_schedule_maintenance_immediate_on_pending_waitlist_port_reoffers_strand
         _Query("first", station),
         _Query("first", station),
         _Query("first", port),
+        _Query("first", None),  # no unresolved schedule already on this port
         _Query("first", entry),  # waitlist entry holding the offer on this port
         _Query("first", None),  # no other Available port at the station to re-offer
     ]
@@ -153,6 +157,36 @@ def test_schedule_maintenance_immediate_on_pending_waitlist_port_reoffers_strand
     assert entry.offered_port_id is None
     assert entry.offered_at is None
     assert port.status == "Maintenance"
+
+
+@patch("app.services.maintenance_service.StationService._check_operator_permission")
+def test_schedule_maintenance_rejects_port_with_unresolved_schedule(mock_permission):
+    """Regression test: without this guard, scheduling a second window while
+    one is already Scheduled/Active on the same port creates two 'Active'
+    rows once both go active - when the first's expiry releases the port,
+    the second's own expiry check finds the port no longer in Maintenance
+    and is permanently skipped, leaving it stuck at 'Active' forever."""
+    from app.models.maintenance import MaintenanceSchedule
+    from fastapi import HTTPException
+    from app.services.maintenance_service import MaintenanceService
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    port = _port("Maintenance")
+    station = _station(port.station_id)
+    existing = MaintenanceSchedule(maintenance_id=uuid.uuid4(), port_id=port.port_id, status="Active")
+
+    db = MagicMock()
+    db.query.side_effect = [
+        _Query("first", port),
+        _Query("first", station),
+        _Query("first", station),
+        _Query("first", port),
+        _Query("first", existing),
+    ]
+
+    with pytest.raises(HTTPException) as exc_info:
+        MaintenanceService.schedule_maintenance(db, MagicMock(user_id=uuid.uuid4()), _payload(port.port_id, now), "127.0.0.1")
+    assert exc_info.value.status_code == 409
 
 
 def test_complete_maintenance_requires_port_currently_in_maintenance():
@@ -224,6 +258,7 @@ class TestCheckScheduledMaintenanceCron:
             _Query("first", port),  # Tier 2 lock
             _Query("first", schedule),  # schedule re-read under lock
             _Query("first", station),  # station lookup for _apply_immediate_maintenance
+            _Query("all", []),  # _auto_expire_finished_maintenance due_ids - none due
         ]
 
         triggered = MaintenanceService.check_scheduled_maintenance(db)
@@ -255,6 +290,7 @@ class TestCheckScheduledMaintenanceCron:
             _Query("first", port),  # Tier 2 lock
             _Query("first", schedule),  # schedule re-read under lock
             _Query("first", station),  # station lookup (unconditional, before the Charging branch)
+            _Query("all", []),  # _auto_expire_finished_maintenance due_ids - none due
         ]
 
         triggered = MaintenanceService.check_scheduled_maintenance(db)
@@ -263,3 +299,72 @@ class TestCheckScheduledMaintenanceCron:
         assert port.status == "Charging"
         assert port.is_pending_maintenance is True
         assert schedule.status == "Scheduled"  # left for the session's own end-of-charge flow to flip
+
+    def test_active_window_past_end_time_auto_releases_port_to_available(self):
+        """Regression test: a Maintenance port must not stay stuck once its
+        window's end_time has passed - the cron should clear it automatically
+        rather than requiring an operator to notice and click 'Clear bay'."""
+        from app.models.maintenance import MaintenanceSchedule
+        from app.services.maintenance_service import MaintenanceService
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        port = _port("Maintenance")
+        maintenance_id = uuid.uuid4()
+        schedule = MaintenanceSchedule(
+            maintenance_id=maintenance_id,
+            port_id=port.port_id,
+            start_time=now - timedelta(hours=2),
+            end_time=now - timedelta(minutes=1),
+            status="Active",
+        )
+
+        db = MagicMock()
+        db.query.side_effect = [
+            _Query("all", []),  # check_scheduled_maintenance's start_time due_ids - none due
+            _Query("all", [(maintenance_id,)]),  # _auto_expire_finished_maintenance due_ids
+            _Query("first", schedule),  # optimistic re-read
+            _Query("first", None),  # Tier 1 lock
+            _Query("first", port),  # Tier 2 lock
+            _Query("first", schedule),  # schedule re-read under lock
+            MagicMock(),  # WAITLIST_REJECTIONS delete query
+        ]
+
+        with patch("app.services.maintenance_service.WaitlistService.find_candidate_waitlist_entry", return_value=None), patch(
+            "app.services.maintenance_service.WaitlistService.apply_promotion_or_release"
+        ) as mock_apply:
+            triggered = MaintenanceService.check_scheduled_maintenance(db)
+
+        assert triggered == 1
+        assert schedule.status == "Completed"
+        mock_apply.assert_called_once_with(db, port, None)
+        db.commit.assert_called_once()
+
+    def test_active_window_past_end_time_but_already_manually_cleared_is_skipped(self):
+        from app.models.maintenance import MaintenanceSchedule
+        from app.services.maintenance_service import MaintenanceService
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        port = _port("Available")  # an operator already cleared it manually
+        maintenance_id = uuid.uuid4()
+        schedule = MaintenanceSchedule(
+            maintenance_id=maintenance_id,
+            port_id=port.port_id,
+            start_time=now - timedelta(hours=2),
+            end_time=now - timedelta(minutes=1),
+            status="Active",
+        )
+
+        db = MagicMock()
+        db.query.side_effect = [
+            _Query("all", []),
+            _Query("all", [(maintenance_id,)]),
+            _Query("first", schedule),
+            _Query("first", None),
+            _Query("first", port),
+            _Query("first", schedule),
+        ]
+
+        triggered = MaintenanceService.check_scheduled_maintenance(db)
+
+        assert triggered == 0
+        db.rollback.assert_called()
