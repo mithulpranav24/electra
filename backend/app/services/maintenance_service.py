@@ -198,6 +198,19 @@ class MaintenanceService:
         db.query(Station).with_for_update(read=True, of=Station).filter(Station.station_id == station.station_id).first()
         port = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == payload.port_id).first()
 
+        # A port may only have one unresolved maintenance cycle at a time -
+        # otherwise two "Active" rows can coexist for the same port, and once
+        # the first one's expiry releases the port, the second's own expiry
+        # finds the port no longer in Maintenance and is permanently skipped,
+        # leaving it stuck at "Active" forever.
+        unresolved = (
+            db.query(MaintenanceSchedule)
+            .filter(MaintenanceSchedule.port_id == port.port_id, MaintenanceSchedule.status.in_(["Scheduled", "Active"]))
+            .first()
+        )
+        if unresolved:
+            raise HTTPException(status_code=409, detail="This port already has an unresolved maintenance schedule")
+
         schedule = MaintenanceSchedule(port_id=port.port_id, start_time=start_time, end_time=end_time, status="Scheduled")
         db.add(schedule)
         db.flush()
@@ -242,10 +255,32 @@ class MaintenanceService:
         )
 
     @staticmethod
+    def _release_port_from_maintenance(db: Session, schedule: MaintenanceSchedule, port: ChargingPort, user_id, ip_address: str) -> None:
+        """DD-17 recovery, shared by the manual 'Clear Bay' action and the
+        automatic end_time expiry: reset the port to Available, reset the
+        port's WAITLIST_REJECTIONS reputation, and decide the queue while the
+        caller holds the station/port locks."""
+        candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
+        WaitlistService.apply_promotion_or_release(db, port, candidate)
+
+        db.query(WaitlistRejection).filter(WaitlistRejection.port_id == port.port_id).delete()
+
+        schedule.status = "Completed"
+
+        log_audit_event(
+            db,
+            user_id=user_id,
+            action="Maintenance Completed",
+            entity_type="MAINTENANCE_SCHEDULES",
+            entity_id=schedule.maintenance_id,
+            details={"port_id": str(port.port_id)},
+            ip_address=ip_address,
+            commit=False,
+        )
+
+    @staticmethod
     def complete_maintenance(db: Session, current_user: User, maintenance_id: UUID, ip_address: str) -> MaintenanceSchedule:
-        """Operator 'Clear Bay' equivalent for a Maintenance port (DD-17): reset
-        the port to Available, reset the port's WAITLIST_REJECTIONS reputation,
-        and decide the queue while holding the station/port locks."""
+        """Operator 'Clear Bay' action: end a Maintenance window early."""
         schedule = db.query(MaintenanceSchedule).filter(MaintenanceSchedule.maintenance_id == maintenance_id).first()
         if not schedule:
             raise HTTPException(status_code=404, detail="Maintenance schedule not found")
@@ -263,32 +298,61 @@ class MaintenanceService:
         if port.status != "Maintenance":
             raise HTTPException(status_code=409, detail="Port is not currently in Maintenance")
 
-        candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
-        WaitlistService.apply_promotion_or_release(db, port, candidate)
-
-        db.query(WaitlistRejection).filter(WaitlistRejection.port_id == port.port_id).delete()
-
-        schedule.status = "Completed"
-
-        log_audit_event(
-            db,
-            user_id=current_user.user_id,
-            action="Maintenance Completed",
-            entity_type="MAINTENANCE_SCHEDULES",
-            entity_id=schedule.maintenance_id,
-            details={"port_id": str(port.port_id)},
-            ip_address=ip_address,
-            commit=False,
-        )
+        MaintenanceService._release_port_from_maintenance(db, schedule, port, current_user.user_id, ip_address)
         db.commit()
         db.refresh(schedule)
         return schedule
 
     @staticmethod
+    def _auto_expire_finished_maintenance(db: Session) -> int:
+        """Companion half of the Scheduled Maintenance Trigger: once an Active
+        window's end_time has passed, automatically release the port back to
+        Available (DD-17) rather than leaving it stuck in Maintenance until an
+        operator manually clears it."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        due_ids = [
+            row[0]
+            for row in db.query(MaintenanceSchedule.maintenance_id)
+            .filter(MaintenanceSchedule.status == "Active", MaintenanceSchedule.end_time <= now)
+            .order_by(MaintenanceSchedule.port_id.asc())
+            .all()
+        ]
+
+        expired = 0
+        for maintenance_id in due_ids:
+            optimistic = db.query(MaintenanceSchedule).filter(MaintenanceSchedule.maintenance_id == maintenance_id).first()
+            if not optimistic or optimistic.status != "Active" or optimistic.end_time > now:
+                continue
+
+            # Tier 1: STATIONS FOR SHARE, Tier 2: CHARGING_PORTS FOR UPDATE.
+            db.query(Station).join(ChargingPort).with_for_update(read=True, of=Station).filter(
+                ChargingPort.port_id == optimistic.port_id
+            ).first()
+            port = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == optimistic.port_id).first()
+            schedule = db.query(MaintenanceSchedule).filter(MaintenanceSchedule.maintenance_id == maintenance_id).first()
+
+            if not port or not schedule or schedule.status != "Active" or schedule.end_time > now:
+                db.rollback()
+                continue
+            if port.status != "Maintenance":
+                # An operator already cleared it manually, or something else
+                # moved the port on - nothing left for expiry to do here.
+                db.rollback()
+                continue
+
+            MaintenanceService._release_port_from_maintenance(db, schedule, port, user_id=None, ip_address="system")
+            db.commit()
+            expired += 1
+
+        return expired
+
+    @staticmethod
     def check_scheduled_maintenance(db: Session) -> int:
         """FR-27 / Architecture.md 3.4 'Scheduled Maintenance Trigger': every
-        minute, transition ports whose maintenance start_time has arrived.
-        Charging ports are skipped here - they were already soft-frozen
+        minute, transition ports whose maintenance start_time has arrived, and
+        release ports whose maintenance end_time has passed. Charging ports
+        are skipped in the start_time half - they were already soft-frozen
         (is_pending_maintenance=True) when scheduled, and _settle_and_finalize
         routes them into Maintenance itself once their session ends."""
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -345,4 +409,4 @@ class MaintenanceService:
             db.commit()
             triggered += 1
 
-        return triggered
+        return triggered + MaintenanceService._auto_expire_finished_maintenance(db)
