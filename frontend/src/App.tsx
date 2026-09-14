@@ -20,6 +20,7 @@ const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
 const AdminReports = lazy(() => import('./pages/admin/Reports'));
 const OperatorDashboard = lazy(() => import('./pages/operator/Dashboard'));
 const OperatorReports = lazy(() => import('./pages/operator/Reports'));
+const Notifications = lazy(() => import('./pages/Notifications'));
 
 function GlobalLoader() {
   return (
@@ -74,6 +75,7 @@ export default function App() {
               <Route path="sessions" element={<Sessions />} />
               <Route path="vehicles" element={<Vehicles />} />
               <Route path="wallet" element={<Wallet />} />
+              <Route path="notifications" element={<Notifications />} />
               <Route path="profile" element={<Profile />} />
               <Route path="*" element={<Navigate to="dashboard" replace />} />
             </Route>
@@ -82,6 +84,7 @@ export default function App() {
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<OperatorDashboard />} />
               <Route path="reports" element={<OperatorReports />} />
+              <Route path="notifications" element={<Notifications />} />
               <Route path="*" element={<Navigate to="dashboard" replace />} />
             </Route>
 
@@ -89,6 +92,7 @@ export default function App() {
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<AdminDashboard />} />
               <Route path="reports" element={<AdminReports />} />
+              <Route path="notifications" element={<Notifications />} />
               <Route path="*" element={<Navigate to="dashboard" replace />} />
             </Route>
 

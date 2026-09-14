@@ -15,6 +15,7 @@ from app.models.wallet import WalletTransaction
 from app.models.vehicle import Vehicle
 from app.schemas.reservation_schema import ReservationCreate, ReservationResponse
 from app.services.audit_service import log_audit_event
+from app.services.notification_service import create_notification
 from app.services.waitlist_service import WaitlistService
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
@@ -87,6 +88,13 @@ def clean_expired_reservations(db: Session):
             reference_id=res.reservation_id
         )
         db.add(penalty_tx)
+        create_notification(
+            db,
+            res.user_id,
+            "Reservation expired",
+            "Your reservation expired because check-in wasn't completed within 15 minutes. The escrow was forfeited per the no-show policy.",
+            commit=False,
+        )
         log_audit_event(
             db,
             user_id=res.user_id,
@@ -148,7 +156,8 @@ def create_reservation(
                 ChargingPort.is_active == True,
                 ChargingPort.connector_type == vehicle.connector_type,
                 ChargingPort.has_health_warning == False,
-                ChargingPort.has_blocked_warning == False
+                ChargingPort.has_blocked_warning == False,
+                ChargingPort.is_pending_maintenance == False
             ).first()
             
             if not available_port:
@@ -201,6 +210,12 @@ def create_reservation(
             details={"port_id": str(target_port_id), "vehicle_id": str(request.vehicle_id)},
             ip_address=str(ip_address),
         )
+        create_notification(
+            db,
+            current_user.user_id,
+            "Reservation confirmed",
+            "Your reservation is confirmed. Check in within 15 minutes to start charging.",
+        )
 
         return new_res
 
@@ -216,6 +231,10 @@ def create_reservation(
             raise HTTPException(status_code=400, detail="You already have an active reservation")
         elif "Port not found" in error_msg:
             raise HTTPException(status_code=404, detail="Port not found")
+        elif "pending maintenance" in error_msg:
+            raise HTTPException(status_code=409, detail="This port is pending maintenance and cannot be reserved")
+        elif "scheduled maintenance" in error_msg:
+            raise HTTPException(status_code=409, detail="This port has scheduled maintenance beginning too soon to complete check-in")
         else:
             raise HTTPException(status_code=400, detail=error_msg)
 

@@ -59,7 +59,7 @@ app.add_middleware(
 def health_check():
     return {"status": "healthy", "environment": settings.environment}
 
-from app.controllers import auth_controller, user_controller, vehicle_controller, wallet_controller, company_controller, station_controller, search_controller, reservation_controller, favorite_controller, waitlist_controller, session_controller, invoice_controller, report_controller
+from app.controllers import auth_controller, user_controller, vehicle_controller, wallet_controller, company_controller, station_controller, search_controller, reservation_controller, favorite_controller, waitlist_controller, session_controller, invoice_controller, report_controller, notification_controller, rating_controller, maintenance_controller
 
 # Routers will be included here as they are developed
 auth_controller.router.route_class = UniformResponseRoute
@@ -75,6 +75,9 @@ waitlist_controller.router.route_class = UniformResponseRoute
 session_controller.router.route_class = UniformResponseRoute
 invoice_controller.router.route_class = UniformResponseRoute
 report_controller.router.route_class = UniformResponseRoute
+notification_controller.router.route_class = UniformResponseRoute
+rating_controller.router.route_class = UniformResponseRoute
+maintenance_controller.router.route_class = UniformResponseRoute
 
 app.include_router(auth_controller.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(user_controller.router, prefix="/api/v1/users", tags=["users"])
@@ -89,3 +92,6 @@ app.include_router(waitlist_controller.router, prefix="/api/v1", tags=["waitlist
 app.include_router(session_controller.router, prefix="/api/v1", tags=["sessions"])
 app.include_router(invoice_controller.router, prefix="/api/v1", tags=["invoices"])
 app.include_router(report_controller.router, prefix="/api/v1/reports", tags=["reports"])
+app.include_router(notification_controller.router, prefix="/api/v1", tags=["notifications"])
+app.include_router(rating_controller.router, prefix="/api/v1", tags=["ratings"])
+app.include_router(maintenance_controller.router, prefix="/api/v1/operator", tags=["maintenance"])
