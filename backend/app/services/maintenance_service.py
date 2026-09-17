@@ -50,13 +50,29 @@ class MaintenanceService:
 
     @staticmethod
     def _cancel_reservation_for_maintenance(db: Session, port: ChargingPort, ip_address: str) -> None:
-        reservation = (
+        # Optimistic read first: locking RESERVATIONS (Tier 4) before USERS
+        # (Tier 3) would invert the global lock hierarchy, since the
+        # WalletTransaction insert below fires trg_update_wallet_balance,
+        # which itself issues an UPDATE USERS and so implicitly locks that
+        # row - it must already be held under FOR UPDATE by then, exactly
+        # like sp_CreateReservation's own USERS -> RESERVATIONS order.
+        reservation_opt = (
             db.query(Reservation)
             .filter(Reservation.port_id == port.port_id, Reservation.status == "Confirmed")
-            .with_for_update()
             .first()
         )
-        if not reservation:
+        if not reservation_opt:
+            return
+
+        # Tier 3: USERS FOR UPDATE -> Tier 4: RESERVATIONS FOR UPDATE.
+        db.query(User).with_for_update().filter(User.user_id == reservation_opt.user_id).first()
+        reservation = (
+            db.query(Reservation)
+            .with_for_update()
+            .filter(Reservation.reservation_id == reservation_opt.reservation_id)
+            .first()
+        )
+        if not reservation or reservation.status != "Confirmed":
             return
 
         reservation.status = "Cancelled"
@@ -119,25 +135,48 @@ class MaintenanceService:
     def _terminate_session_for_maintenance(db: Session, port: ChargingPort, station: Station, ip_address: str) -> None:
         from app.services.session_service import SessionService  # local import: avoids a service-to-service import cycle
 
-        reservation = (
+        # Optimistic read first, purely to discover the reservation/session
+        # IDs - no locks yet.
+        reservation_opt = (
             db.query(Reservation)
             .filter(Reservation.port_id == port.port_id, Reservation.status == "Active")
-            .with_for_update()
             .first()
         )
-        session = None
-        if reservation:
-            session = (
-                db.query(ChargingSession)
-                .filter(ChargingSession.reservation_id == reservation.reservation_id, ChargingSession.end_time.is_(None))
-                .with_for_update()
-                .first()
-            )
-        if not reservation or not session:
+        if not reservation_opt:
+            return
+        session_opt = (
+            db.query(ChargingSession)
+            .filter(ChargingSession.reservation_id == reservation_opt.reservation_id, ChargingSession.end_time.is_(None))
+            .first()
+        )
+        if not session_opt:
             return
 
-        vehicle = db.query(Vehicle).filter(Vehicle.vehicle_id == reservation.vehicle_id).first()
-        user = db.query(User).with_for_update().filter(User.user_id == reservation.user_id).first()
+        # Lock hierarchy (STATIONS/CHARGING_PORTS already held by the caller):
+        # Tier 2.5 VEHICLES FOR SHARE -> Tier 3 USERS FOR UPDATE -> Tier 4
+        # RESERVATIONS FOR UPDATE -> Tier 6 CHARGING_SESSIONS FOR UPDATE,
+        # matching SessionService.stop_session's own lock order exactly.
+        vehicle = db.query(Vehicle).with_for_update(read=True).filter(Vehicle.vehicle_id == reservation_opt.vehicle_id).first()
+        user = db.query(User).with_for_update().filter(User.user_id == reservation_opt.user_id).first()
+        reservation = (
+            db.query(Reservation)
+            .with_for_update()
+            .filter(Reservation.reservation_id == reservation_opt.reservation_id)
+            .first()
+        )
+        session = (
+            db.query(ChargingSession)
+            .with_for_update()
+            .filter(ChargingSession.session_id == session_opt.session_id)
+            .first()
+        )
+
+        # Re-validate under lock: another request may have changed things
+        # (e.g. the driver stopped the session themselves) since the
+        # optimistic read above.
+        if not reservation or reservation.status != "Active" or not session or session.end_time is not None:
+            return
+
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         SessionService._settle_and_finalize(

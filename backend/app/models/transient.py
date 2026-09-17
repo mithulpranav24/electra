@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, DateTime, Numeric, String, ForeignKey, func
+from sqlalchemy import Column, DateTime, Numeric, String, Text, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database import Base
 
@@ -33,7 +33,7 @@ class SearchHistory(Base):
     __tablename__ = 'search_history'
     search_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
-    search_query = Column(String(255), nullable=False)
+    search_query = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
 
 class Favorite(Base):
