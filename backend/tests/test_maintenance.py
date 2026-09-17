@@ -115,7 +115,9 @@ def test_schedule_maintenance_immediate_on_reserved_port_cancels_without_penalty
         _Query("first", station),  # Tier 1 lock
         _Query("first", port),  # Tier 2 lock
         _Query("first", None),  # no unresolved schedule already on this port
-        _Query("first", reservation),  # reservation lookup inside _cancel_reservation_for_maintenance
+        _Query("first", reservation),  # optimistic reservation read (no lock yet)
+        _Query("first", None),  # Tier 3: USERS FOR UPDATE
+        _Query("first", reservation),  # Tier 4: RESERVATIONS FOR UPDATE (locked re-read)
     ]
 
     schedule = MaintenanceService.schedule_maintenance(db, MagicMock(user_id=uuid.uuid4()), _payload(port.port_id, now), "127.0.0.1")
@@ -129,6 +131,61 @@ def test_schedule_maintenance_immediate_on_reserved_port_cancels_without_penalty
     wallet_tx = next(c.args[0] for c in db.add.call_args_list if type(c.args[0]).__name__ == "WalletTransaction")
     assert wallet_tx.transaction_type == "Escrow Release"
     assert wallet_tx.amount == pytest.approx(1000.00)
+
+
+@patch("app.services.session_service.SessionService._settle_and_finalize")
+@patch("app.services.maintenance_service.StationService._check_operator_permission")
+def test_schedule_maintenance_immediate_on_charging_port_locks_in_correct_hierarchy_order(mock_permission, mock_settle):
+    """Regression test: VEHICLES -> USERS -> RESERVATIONS -> CHARGING_SESSIONS
+    must be locked in that order (matching SessionService.stop_session's own
+    order exactly) - locking RESERVATIONS/CHARGING_SESSIONS before USERS
+    would invert the global lock hierarchy and risk deadlocking against
+    stop_session under concurrent load."""
+    from app.models.reservation import Reservation
+    from app.models.session import ChargingSession
+    from app.models.user import User
+    from app.models.vehicle import Vehicle
+    from app.services.maintenance_service import MaintenanceService
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    port = _port("Charging")
+    station = _station(port.station_id)
+    reservation = Reservation(
+        reservation_id=uuid.uuid4(), user_id=uuid.uuid4(), vehicle_id=uuid.uuid4(), port_id=port.port_id, status="Active"
+    )
+    session = ChargingSession(session_id=uuid.uuid4(), reservation_id=reservation.reservation_id, end_time=None)
+    vehicle = Vehicle(vehicle_id=reservation.vehicle_id)
+    user = User(user_id=reservation.user_id)
+
+    db = MagicMock()
+    db.query.side_effect = [
+        _Query("first", port),
+        _Query("first", station),
+        _Query("first", station),  # Tier 1 lock
+        _Query("first", port),  # Tier 2 lock
+        _Query("first", None),  # no unresolved schedule already on this port
+        _Query("first", reservation),  # optimistic reservation read (no lock yet)
+        _Query("first", session),  # optimistic session read (no lock yet)
+        _Query("first", vehicle),  # Tier 2.5: VEHICLES FOR SHARE
+        _Query("first", user),  # Tier 3: USERS FOR UPDATE
+        _Query("first", reservation),  # Tier 4: RESERVATIONS FOR UPDATE (locked re-read)
+        _Query("first", session),  # Tier 6: CHARGING_SESSIONS FOR UPDATE (locked re-read)
+    ]
+
+    schedule = MaintenanceService.schedule_maintenance(db, MagicMock(user_id=uuid.uuid4()), _payload(port.port_id, now), "127.0.0.1")
+
+    assert schedule.status == "Active"
+    assert port.status == "Maintenance"
+    mock_settle.assert_called_once()
+    args, kwargs = mock_settle.call_args
+    assert args[6] is user  # the `user` positional argument passed to _settle_and_finalize
+    assert kwargs["force_port_status"] == "Maintenance"
+    assert kwargs["waive_minimum_fee"] is True
+
+    # The 7 queries before the lock sequence (indices 0-6) are the setup;
+    # locked_models must appear in exactly this order.
+    locked_models = [call.args[0] for call in db.query.call_args_list[7:11]]
+    assert locked_models == [Vehicle, User, Reservation, ChargingSession]
 
 
 @patch("app.services.maintenance_service.StationService._check_operator_permission")
