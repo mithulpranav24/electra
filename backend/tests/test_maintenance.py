@@ -205,8 +205,9 @@ def test_schedule_maintenance_immediate_on_pending_waitlist_port_reoffers_strand
         _Query("first", station),
         _Query("first", port),
         _Query("first", None),  # no unresolved schedule already on this port
-        _Query("first", entry),  # waitlist entry holding the offer on this port
-        _Query("first", None),  # no other Available port at the station to re-offer
+        _Query("first", entry),  # optimistic waitlist entry read (no lock yet)
+        _Query("first", None),  # Tier 2: no other Available port at the station to re-offer
+        _Query("first", entry),  # Tier 3.5: WAITLIST FOR UPDATE (locked re-read)
     ]
 
     MaintenanceService.schedule_maintenance(db, MagicMock(user_id=uuid.uuid4()), _payload(port.port_id, now), "127.0.0.1")
@@ -214,6 +215,42 @@ def test_schedule_maintenance_immediate_on_pending_waitlist_port_reoffers_strand
     assert entry.offered_port_id is None
     assert entry.offered_at is None
     assert port.status == "Maintenance"
+
+
+@patch("app.services.maintenance_service.StationService._check_operator_permission")
+def test_schedule_maintenance_immediate_on_pending_waitlist_locks_other_port_before_waitlist(mock_permission):
+    """Regression test: a re-offer target is a second CHARGING_PORTS row
+    (Tier 2), which must be locked before WAITLIST (Tier 3.5) per the global
+    hierarchy - locking WAITLIST first and only then discovering a
+    CHARGING_PORTS lock is needed would invert it."""
+    from app.models.station import ChargingPort
+    from app.models.transient import Waitlist
+    from app.services.maintenance_service import MaintenanceService
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    port = _port("Pending Waitlist")
+    station = _station(port.station_id)
+    entry = Waitlist(waitlist_id=uuid.uuid4(), user_id=uuid.uuid4(), station_id=port.station_id, offered_port_id=port.port_id)
+    other_port = _port("Available", station_id=port.station_id, connector_type=port.connector_type)
+
+    db = MagicMock()
+    db.query.side_effect = [
+        _Query("first", port),
+        _Query("first", station),
+        _Query("first", station),
+        _Query("first", port),
+        _Query("first", None),  # no unresolved schedule already on this port
+        _Query("first", entry),  # optimistic waitlist entry read
+        _Query("first", other_port),  # Tier 2: CHARGING_PORTS FOR UPDATE (re-offer target)
+        _Query("first", entry),  # Tier 3.5: WAITLIST FOR UPDATE (locked re-read)
+    ]
+
+    with patch("app.services.maintenance_service.WaitlistService.apply_promotion_or_release") as mock_apply:
+        MaintenanceService.schedule_maintenance(db, MagicMock(user_id=uuid.uuid4()), _payload(port.port_id, now), "127.0.0.1")
+
+    mock_apply.assert_called_once_with(db, other_port, entry)
+    locked_models = [call.args[0] for call in db.query.call_args_list[6:8]]
+    assert locked_models == [ChargingPort, Waitlist]
 
 
 @patch("app.services.maintenance_service.StationService._check_operator_permission")

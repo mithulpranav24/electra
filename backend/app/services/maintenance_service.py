@@ -25,30 +25,6 @@ ESCROW_AMOUNT = Decimal("1000.00")
 
 class MaintenanceService:
     @staticmethod
-    def _reoffer_stranded_waitlist_entry(db: Session, entry: Waitlist, connector_type: str) -> None:
-        """FR-27: a driver whose offer was cancelled by immediate maintenance is
-        never penalized - their offer is nulled out (returning them to the
-        front of the queue) and, if another Available port exists at the
-        station for their connector type, they are immediately re-offered
-        that port instead of waiting for the next promotion cycle."""
-        entry.offered_port_id = None
-        entry.offered_at = None
-
-        other_port = (
-            db.query(ChargingPort)
-            .filter(
-                ChargingPort.station_id == entry.station_id,
-                ChargingPort.connector_type == connector_type,
-                ChargingPort.status == "Available",
-                ChargingPort.is_active.is_(True),
-            )
-            .with_for_update()
-            .first()
-        )
-        if other_port:
-            WaitlistService.apply_promotion_or_release(db, other_port, entry)
-
-    @staticmethod
     def _cancel_reservation_for_maintenance(db: Session, port: ChargingPort, ip_address: str) -> None:
         # Optimistic read first: locking RESERVATIONS (Tier 4) before USERS
         # (Tier 3) would invert the global lock hierarchy, since the
@@ -108,11 +84,42 @@ class MaintenanceService:
 
     @staticmethod
     def _cancel_waitlist_offer_for_maintenance(db: Session, port: ChargingPort, ip_address: str) -> None:
-        entry = db.query(Waitlist).filter(Waitlist.offered_port_id == port.port_id).with_for_update().first()
-        if not entry:
+        # Optimistic read first: a re-offer target, if one exists, is a
+        # second CHARGING_PORTS row (Tier 2), which must be locked before
+        # WAITLIST (Tier 3.5) per the global hierarchy - locking WAITLIST
+        # first and only then discovering we need a CHARGING_PORTS lock
+        # would invert it.
+        entry_opt = db.query(Waitlist).filter(Waitlist.offered_port_id == port.port_id).first()
+        if not entry_opt:
             return
 
-        MaintenanceService._reoffer_stranded_waitlist_entry(db, entry, port.connector_type)
+        # Tier 2: CHARGING_PORTS FOR UPDATE (only if a re-offer target exists).
+        other_port = (
+            db.query(ChargingPort)
+            .filter(
+                ChargingPort.station_id == entry_opt.station_id,
+                ChargingPort.connector_type == port.connector_type,
+                ChargingPort.status == "Available",
+                ChargingPort.is_active.is_(True),
+            )
+            .with_for_update()
+            .first()
+        )
+
+        # Tier 3.5: WAITLIST FOR UPDATE.
+        entry = db.query(Waitlist).with_for_update().filter(Waitlist.waitlist_id == entry_opt.waitlist_id).first()
+        if not entry or entry.offered_port_id != port.port_id:
+            # State moved on since the optimistic read (offer already
+            # resolved some other way) - nothing left for this cascade to do.
+            return
+
+        # FR-27: never penalized - offer nulled out, returning them to the
+        # front of the queue, with an immediate re-offer if a port is free.
+        entry.offered_port_id = None
+        entry.offered_at = None
+        if other_port:
+            WaitlistService.apply_promotion_or_release(db, other_port, entry)
+
         create_notification(
             db,
             entry.user_id,
