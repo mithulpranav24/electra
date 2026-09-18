@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -7,12 +9,14 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.models.station import Station, ChargingPort
-from app.models.transient import RecentStation
+from app.models.transient import RecentStation, SearchHistory
 from app.schemas.station import StationResponse
-from app.schemas.search_schema import StationSearchRequest
+from app.schemas.search_schema import SearchHistoryEntry, StationSearchRequest
 from app.services.station_service import StationService
 
 router = APIRouter(prefix="/search", tags=["Search"])
+
+SEARCH_HISTORY_LIMIT = 20
 
 @router.post("/stations", response_model=List[StationResponse])
 def search_stations(
@@ -49,7 +53,19 @@ def search_stations(
         
     query = query.order_by(distance)
     results = query.all()
-    
+
+    # FR-22 Search History: securely store the driver's own past searches
+    # (area + filters) so they can be surfaced back as suggestions later.
+    search_payload = {
+        "lat": request.lat,
+        "lng": request.lng,
+        "radius_km": request.radius_km,
+        "connector_type": request.connector_type,
+        "min_power_kw": request.min_power_kw,
+    }
+    db.add(SearchHistory(user_id=current_user.user_id, search_query=json.dumps(search_payload)))
+    db.commit()
+
     # results is a list of tuples (Station, distance)
     # We need to add distance to the schema if needed, or just return sorted stations
     stations = []
@@ -109,6 +125,49 @@ def get_recent_stations(
         ).first()
         if station:
             stations.append(StationService._to_schema(db, station))
-            
+
     return stations
+
+
+@router.get("/history", response_model=List[SearchHistoryEntry])
+def get_search_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    records = (
+        db.query(SearchHistory)
+        .filter(SearchHistory.user_id == current_user.user_id)
+        .order_by(SearchHistory.created_at.desc())
+        .limit(SEARCH_HISTORY_LIMIT)
+        .all()
+    )
+
+    history = []
+    for record in records:
+        try:
+            payload = json.loads(record.search_query)
+        except (TypeError, ValueError):
+            continue
+        history.append(
+            SearchHistoryEntry(
+                search_id=record.search_id,
+                lat=payload.get("lat"),
+                lng=payload.get("lng"),
+                radius_km=payload.get("radius_km"),
+                connector_type=payload.get("connector_type"),
+                min_power_kw=payload.get("min_power_kw"),
+                created_at=record.created_at,
+            )
+        )
+    return history
+
+
+@router.delete("/history")
+def clear_search_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db.query(SearchHistory).filter(SearchHistory.user_id == current_user.user_id).delete()
+    db.commit()
+    return {"message": "Search history cleared"}
 

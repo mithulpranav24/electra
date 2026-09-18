@@ -199,3 +199,56 @@ export interface OperatorReport {
   peak_hours: Array<{ hour: number; count: number }>;
   queue_statistics: Array<{ station_id: string; name: string; queue_length: number }>;
 }
+
+export interface Notification {
+  notification_id: string;
+  title: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface Rating {
+  rating_id: string;
+  user_id: string;
+  station_id: string;
+  overall_score: number;
+  cleanliness_score: number;
+  access_score: number;
+  experience_score: number;
+  comment?: string | null;
+  created_at: string;
+}
+
+export interface StationRatingSummary {
+  rating_count: number;
+  average_overall: number | null;
+  average_cleanliness: number | null;
+  average_access: number | null;
+  average_experience: number | null;
+}
+
+export interface StationRatingsResponse {
+  summary: StationRatingSummary;
+  ratings: Rating[];
+  my_rating: Rating | null;
+}
+
+export interface SearchHistoryEntry {
+  search_id: string;
+  lat: number;
+  lng: number;
+  radius_km: number;
+  connector_type?: string | null;
+  min_power_kw?: number | null;
+  created_at: string;
+}
+
+export interface MaintenanceSchedule {
+  maintenance_id: string;
+  port_id: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  created_at: string;
+}

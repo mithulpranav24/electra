@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Clock3, Heart, ListPlus, MapPin, PlugZap, ShieldAlert, WalletCards, Zap } from 'lucide-react';
+import { ArrowLeft, Clock3, Heart, ListPlus, MapPin, MessageSquare, PlugZap, ShieldAlert, Star, WalletCards, Zap } from 'lucide-react';
 import { useAuth } from '../../context/auth-context';
-import { favoriteService, reservationService, searchService, vehicleService, waitlistService } from '../../services/api';
-import type { ChargingPort, Reservation, Station, Vehicle, WaitlistStatus } from '../../types';
+import { favoriteService, ratingService, reservationService, searchService, vehicleService, waitlistService } from '../../services/api';
+import type { ChargingPort, Reservation, Station, StationRatingsResponse, Vehicle, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
-import { formatCurrency, normalizeConnector, vehicleId } from '../../lib/format';
+import { formatCurrency, formatDate, normalizeConnector, vehicleId } from '../../lib/format';
 import { MOCK_USER_LAT, MOCK_USER_LNG } from '../../lib/geo';
 import { ReservationModal } from '../../components/ReservationModal';
 import { WaitlistJoinModal } from '../../components/WaitlistJoinModal';
@@ -22,6 +22,40 @@ interface StationPageData {
   vehicles: Vehicle[];
   activeReservations: Reservation[];
   waitlistStatus: WaitlistStatus | null;
+  ratings: StationRatingsResponse | null;
+}
+
+function StarPicker({ label, value, onChange }: { label: string; value: number; onChange: (score: number) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-sm font-semibold text-[var(--ink)]">{label}</span>
+      <div className="flex gap-1" role="radiogroup" aria-label={label}>
+        {[1, 2, 3, 4, 5].map((score) => (
+          <button
+            key={score}
+            type="button"
+            role="radio"
+            aria-checked={value === score}
+            aria-label={`${score} star${score === 1 ? '' : 's'}`}
+            onClick={() => onChange(score)}
+            className="p-0.5"
+          >
+            <Star size={22} className={score <= value ? 'fill-[var(--amber)] text-[var(--amber)]' : 'text-[var(--line)]'} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StarRow({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-xs text-[var(--steel)]">No ratings yet</span>;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Star size={16} className="fill-[var(--amber)] text-[var(--amber)]" />
+      <span className="font-data text-sm font-bold">{value.toFixed(1)}</span>
+    </span>
+  );
 }
 
 export function StationDetails() {
@@ -42,20 +76,32 @@ export function StationDetails() {
   const [isJoiningWaitlist, setIsJoiningWaitlist] = useState(false);
   const [isLeavingWaitlist, setIsLeavingWaitlist] = useState(false);
   const [isConfirmingOffer, setIsConfirmingOffer] = useState(false);
+  const [ratingForm, setRatingForm] = useState({ overall_score: 0, cleanliness_score: 0, access_score: 0, experience_score: 0, comment: '' });
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
 
   const loadStation = useCallback(async () => {
     setError('');
     setIsLoading(true);
     try {
-      const [station, vehicles, activeReservations, favorites, waitlistStatus] = await Promise.all([
+      const [station, vehicles, activeReservations, favorites, waitlistStatus, ratings] = await Promise.all([
         searchService.getStation(id),
         vehicleService.getVehicles(),
         reservationService.getActive(),
         favoriteService.getFavorites().catch(() => []),
         waitlistService.getStatus().catch(() => null),
+        ratingService.getStationRatings(id).catch(() => null),
       ]);
-      setData({ station, vehicles, activeReservations, waitlistStatus });
+      setData({ station, vehicles, activeReservations, waitlistStatus, ratings });
       setIsFavorite(favorites.some((favorite) => favorite.station_id === id));
+      if (ratings?.my_rating) {
+        setRatingForm({
+          overall_score: ratings.my_rating.overall_score,
+          cleanliness_score: ratings.my_rating.cleanliness_score,
+          access_score: ratings.my_rating.access_score,
+          experience_score: ratings.my_rating.experience_score,
+          comment: ratings.my_rating.comment ?? '',
+        });
+      }
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Station details could not be loaded.'));
     } finally {
@@ -150,6 +196,24 @@ export function StationDetails() {
     }
   };
 
+  const handleSubmitRating = async () => {
+    if (!id || !ratingForm.overall_score || !ratingForm.cleanliness_score || !ratingForm.access_score || !ratingForm.experience_score) {
+      pushToast({ title: 'Rate every category', message: 'Overall, cleanliness, access, and experience all need a score.', tone: 'error' });
+      return;
+    }
+    setIsSubmittingRating(true);
+    try {
+      await ratingService.submitRating(id, { ...ratingForm, comment: ratingForm.comment || null });
+      const ratings = await ratingService.getStationRatings(id);
+      setData((current) => current ? { ...current, ratings } : current);
+      pushToast({ title: 'Thanks for the review', tone: 'success' });
+    } catch (ratingError) {
+      pushToast({ title: 'Couldn’t submit your rating', message: getErrorMessage(ratingError, 'You may need a completed session here first.'), tone: 'error' });
+    } finally {
+      setIsSubmittingRating(false);
+    }
+  };
+
   const handleReserve = async () => {
     if (!selectedPort || !selectedVehicleId) return;
     setIsReserving(true);
@@ -185,6 +249,9 @@ export function StationDetails() {
               <span className="font-data flex items-center gap-1.5"><Zap size={16} className="text-[var(--amber)]" /> {formatCurrency(station.price_per_kwh)}/kWh</span>
               <span className="flex items-center gap-1.5"><Clock3 size={16} /> {hours}</span>
               <span className="font-data flex items-center gap-1.5"><MapPin size={16} /> {station.lat.toFixed(4)}, {station.lng.toFixed(4)}</span>
+              {data.ratings && data.ratings.summary.rating_count > 0 && (
+                <span className="flex items-center gap-1.5"><Star size={16} className="fill-[var(--amber)] text-[var(--amber)]" /> {data.ratings.summary.average_overall?.toFixed(1)} ({data.ratings.summary.rating_count})</span>
+              )}
             </div>
           </div>
           <IconButton label={isFavorite ? 'Remove from saved stations' : 'Save station'} onClick={() => void handleFavorite()} disabled={isTogglingFavorite} className={`border-white/15 ${isFavorite ? '!bg-[var(--red-soft)] !text-[var(--red)]' : '!bg-white/10 !text-white hover:!bg-white/20'}`}><Heart size={20} fill={isFavorite ? 'currentColor' : 'none'} /></IconButton>
@@ -242,6 +309,62 @@ export function StationDetails() {
             })}
           </div>
         )}
+      </section>
+
+      <section className="surface overflow-hidden">
+        <div className="border-b border-[var(--line)] p-5 sm:p-6"><SectionHeader title="Ratings & reviews" description="Overall, cleanliness, ease of access, and charging experience, 1–5." /></div>
+        <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-2">
+          <div>
+            {data.ratings && data.ratings.summary.rating_count > 0 ? (
+              <>
+                <div className="mb-4 flex items-baseline gap-2">
+                  <span className="font-data text-3xl font-bold">{data.ratings.summary.average_overall?.toFixed(1)}</span>
+                  <StarRow value={data.ratings.summary.average_overall} />
+                  <span className="text-sm text-[var(--steel)]">· {data.ratings.summary.rating_count} review{data.ratings.summary.rating_count === 1 ? '' : 's'}</span>
+                </div>
+                <dl className="mb-5 grid grid-cols-3 gap-3 text-sm">
+                  <div><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Cleanliness</dt><dd className="mt-0.5"><StarRow value={data.ratings.summary.average_cleanliness} /></dd></div>
+                  <div><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Access</dt><dd className="mt-0.5"><StarRow value={data.ratings.summary.average_access} /></dd></div>
+                  <div><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Experience</dt><dd className="mt-0.5"><StarRow value={data.ratings.summary.average_experience} /></dd></div>
+                </dl>
+                {data.ratings.ratings.length === 0 ? (
+                  <p className="text-sm text-[var(--steel)]">No written reviews yet.</p>
+                ) : (
+                  <ul className="flex flex-col gap-4">
+                    {data.ratings.ratings.map((review) => (
+                      <li key={review.rating_id} className="rounded-[var(--radius-md)] border border-[var(--line)] p-3.5">
+                        <div className="flex items-center justify-between gap-3"><StarRow value={review.overall_score} /><span className="text-xs text-[var(--steel)]">{formatDate(review.created_at)}</span></div>
+                        {review.comment && <p className="mt-1.5 text-sm text-[var(--steel-dark)]">{review.comment}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <EmptyState compact title="No reviews yet" description="Be the first driver to rate this station." icon={<MessageSquare size={20} />} />
+            )}
+          </div>
+
+          {user?.role === 'Driver' && (
+            <div className="rounded-[var(--radius-md)] border border-[var(--line)] bg-[var(--paper-muted)] p-4 sm:p-5">
+              <p className="mb-4 text-sm font-bold">{data.ratings?.my_rating ? 'Update your rating' : 'Rate this station'}</p>
+              <div className="flex flex-col gap-3">
+                <StarPicker label="Overall" value={ratingForm.overall_score} onChange={(score) => setRatingForm((current) => ({ ...current, overall_score: score }))} />
+                <StarPicker label="Cleanliness" value={ratingForm.cleanliness_score} onChange={(score) => setRatingForm((current) => ({ ...current, cleanliness_score: score }))} />
+                <StarPicker label="Ease of access" value={ratingForm.access_score} onChange={(score) => setRatingForm((current) => ({ ...current, access_score: score }))} />
+                <StarPicker label="Charging experience" value={ratingForm.experience_score} onChange={(score) => setRatingForm((current) => ({ ...current, experience_score: score }))} />
+                <textarea
+                  className="field-control mt-1 min-h-20 resize-none"
+                  placeholder="Share details of your experience (optional)"
+                  value={ratingForm.comment}
+                  onChange={(event) => setRatingForm((current) => ({ ...current, comment: event.target.value }))}
+                />
+                <Button variant="primary" onClick={() => void handleSubmitRating()} isLoading={isSubmittingRating}>{data.ratings?.my_rating ? 'Update rating' : 'Submit rating'}</Button>
+                <p className="text-xs text-[var(--steel)]">You can only rate stations where you’ve completed a charging session.</p>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       <ReservationModal

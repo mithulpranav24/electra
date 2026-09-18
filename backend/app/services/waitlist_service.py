@@ -13,6 +13,7 @@ from app.models.transient import Waitlist, WaitlistRejection
 from app.models.user import User
 from app.models.vehicle import Vehicle
 from app.services.audit_service import log_audit_event
+from app.services.notification_service import create_notification
 from app.services.penalty_service import PenaltyService
 
 ESCROW_AMOUNT = Decimal("1000.00")
@@ -140,6 +141,13 @@ class WaitlistService:
             port.status = "Pending Waitlist"
             candidate.offered_port_id = port.port_id
             candidate.offered_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            create_notification(
+                db,
+                candidate.user_id,
+                "A charging port is available",
+                "A port matching your waitlist request just opened up. You have 90 seconds to confirm it before the offer expires.",
+                commit=False,
+            )
             return candidate
 
         port.status = "Available"
