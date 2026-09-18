@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, CircleOff, MapPin, Pencil, PlugZap, Plus, RadioTower, Trash2, Wrench } from 'lucide-react';
-import { authService, operatorService } from '../../services/api';
-import type { ChargingPort, CompanyMembership, Station } from '../../types';
+import { Building2, CalendarClock, CircleOff, MapPin, Pencil, PlugZap, Plus, RadioTower, Star, Trash2, Wrench } from 'lucide-react';
+import { authService, maintenanceService, operatorService, ratingService } from '../../services/api';
+import type { ChargingPort, CompanyMembership, MaintenanceSchedule, Station, StationRatingSummary } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
-import { formatCurrency, shortId } from '../../lib/format';
+import { formatCurrency, formatDateTime, shortId } from '../../lib/format';
+import { MaintenanceDialog } from '../../components/operator/MaintenanceDialog';
 import { PortFormDialog } from '../../components/operator/PortFormDialog';
 import { StationFormDialog } from '../../components/operator/StationFormDialog';
 import { Badge } from '../../ui/Badge';
@@ -16,6 +17,12 @@ import { useToast } from '../../ui/ToastContext';
 
 type DeleteTarget = { kind: 'station'; station: Station } | { kind: 'port'; port: ChargingPort; stationName: string };
 
+function maintenanceTone(status: string) {
+  if (status === 'Active') return 'danger' as const;
+  if (status === 'Completed') return 'success' as const;
+  return 'info' as const;
+}
+
 export default function OperatorDashboard() {
   const [memberships, setMemberships] = useState<CompanyMembership[]>([]);
   const [companyId, setCompanyId] = useState('');
@@ -26,13 +33,25 @@ export default function OperatorDashboard() {
   const [portDialog, setPortDialog] = useState<{ open: boolean; stationId: string; port: ChargingPort | null }>({ open: false, stationId: '', port: null });
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [maintenanceDialog, setMaintenanceDialog] = useState<{ open: boolean; port: ChargingPort | null }>({ open: false, port: null });
+  const [maintenanceByStation, setMaintenanceByStation] = useState<Record<string, MaintenanceSchedule[]>>({});
+  const [expandedMaintenanceStation, setExpandedMaintenanceStation] = useState<string | null>(null);
+  const [completingMaintenanceId, setCompletingMaintenanceId] = useState<string | null>(null);
+  const [ratingsByStation, setRatingsByStation] = useState<Record<string, StationRatingSummary>>({});
   const { pushToast } = useToast();
 
   const loadStations = useCallback(async (targetCompanyId: string, showLoader = true) => {
     if (showLoader) setIsLoading(true);
     setError('');
     try {
-      setStations(await operatorService.getStations(targetCompanyId));
+      const loadedStations = await operatorService.getStations(targetCompanyId);
+      setStations(loadedStations);
+      const summaries = await Promise.all(
+        loadedStations.map((station) => ratingService.getStationRatings(station.station_id).then((response) => response.summary).catch(() => null)),
+      );
+      setRatingsByStation(Object.fromEntries(
+        loadedStations.map((station, index) => [station.station_id, summaries[index]]).filter((entry): entry is [string, StationRatingSummary] => entry[1] !== null),
+      ));
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Stations could not be loaded for this company.'));
     } finally {
@@ -90,6 +109,38 @@ export default function OperatorDashboard() {
 
   const deleteName = deleteTarget?.kind === 'station' ? deleteTarget.station.name : deleteTarget?.kind === 'port' ? `port ${deleteTarget.port.qr_code}` : 'this item';
 
+  const toggleMaintenanceList = async (stationId: string) => {
+    if (expandedMaintenanceStation === stationId) {
+      setExpandedMaintenanceStation(null);
+      return;
+    }
+    setExpandedMaintenanceStation(stationId);
+    if (maintenanceByStation[stationId]) return;
+    try {
+      const schedules = await maintenanceService.listForStation(stationId);
+      setMaintenanceByStation((current) => ({ ...current, [stationId]: schedules }));
+    } catch (loadError) {
+      pushToast({ title: 'Couldn’t load maintenance history', message: getErrorMessage(loadError, 'Try again.'), tone: 'error' });
+    }
+  };
+
+  const handleCompleteMaintenance = async (stationId: string, maintenanceId: string) => {
+    setCompletingMaintenanceId(maintenanceId);
+    try {
+      const updated = await maintenanceService.complete(maintenanceId);
+      setMaintenanceByStation((current) => ({
+        ...current,
+        [stationId]: (current[stationId] ?? []).map((entry) => entry.maintenance_id === maintenanceId ? updated : entry),
+      }));
+      await refresh();
+      pushToast({ title: 'Port cleared', message: 'The port is back in rotation.', tone: 'success' });
+    } catch (completeError) {
+      pushToast({ title: 'Couldn’t clear the port', message: getErrorMessage(completeError, 'Try again.'), tone: 'error' });
+    } finally {
+      setCompletingMaintenanceId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-7 enter-up">
       <PageHeader eyebrow="Operator workspace" title="Station operations" description="Keep stations bookable, port states accurate, and warnings visible to drivers." actions={<><Button icon={<PlugZap size={18} />} onClick={() => setPortDialog({ open: true, stationId: '', port: null })} disabled={!companyId || stations.length === 0}>Add port</Button><Button variant="primary" icon={<Plus size={18} />} onClick={() => setStationDialog({ open: true, station: null })} disabled={!companyId}>Create station</Button></>} />
@@ -126,12 +177,47 @@ export default function OperatorDashboard() {
                   <article key={station.station_id} className={!station.is_active ? 'bg-[var(--paper-muted)] opacity-75' : ''}>
                     <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
                       <div className="min-w-0">
-                        <div className="mb-2 flex flex-wrap items-center gap-2"><h3 className="font-display text-xl font-bold">{station.name}</h3><Badge tone={station.is_active ? 'success' : 'danger'}>{station.is_active ? 'Active' : 'Inactive'}</Badge>{station.is_deprecating && <Badge tone="warning">Deprecating</Badge>}{station.locked_gate && <Badge tone="info">Locked gate</Badge>}</div>
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <h3 className="font-display text-xl font-bold">{station.name}</h3>
+                          <Badge tone={station.is_active ? 'success' : 'danger'}>{station.is_active ? 'Active' : 'Inactive'}</Badge>
+                          {station.is_deprecating && <Badge tone="warning">Deprecating</Badge>}
+                          {station.locked_gate && <Badge tone="info">Locked gate</Badge>}
+                          {ratingsByStation[station.station_id] && ratingsByStation[station.station_id].rating_count > 0 && (
+                            <span className="flex items-center gap-1 text-xs font-bold text-[var(--steel-dark)]"><Star size={13} className="fill-[var(--amber)] text-[var(--amber)]" />{ratingsByStation[station.station_id].average_overall?.toFixed(1)} ({ratingsByStation[station.station_id].rating_count})</span>
+                          )}
+                        </div>
                         <p className="font-data text-xs text-[var(--steel)]">{station.lat.toFixed(4)}, {station.lng.toFixed(4)} · {station.timezone}</p>
                         <p className="mt-2 text-sm text-[var(--steel-dark)]">{formatCurrency(station.price_per_kwh)}/kWh · Minimum {formatCurrency(station.minimum_session_fee)} · {station.opening_time_local && station.closing_time_local ? `${station.opening_time_local.slice(0, 5)}–${station.closing_time_local.slice(0, 5)}` : '24 hours'}</p>
                       </div>
-                      <div className="flex gap-2"><Button size="sm" icon={<Plus size={16} />} onClick={() => setPortDialog({ open: true, stationId: station.station_id, port: null })} disabled={!station.is_active}>Add port</Button><IconButton label={`Edit ${station.name}`} onClick={() => setStationDialog({ open: true, station })}><Pencil size={17} /></IconButton><IconButton label={`Deactivate ${station.name}`} variant="danger" onClick={() => setDeleteTarget({ kind: 'station', station })} disabled={!station.is_active}><Trash2 size={17} /></IconButton></div>
+                      <div className="flex gap-2"><Button size="sm" variant="ghost" icon={<CalendarClock size={16} />} onClick={() => void toggleMaintenanceList(station.station_id)}>{expandedMaintenanceStation === station.station_id ? 'Hide maintenance' : 'Maintenance history'}</Button><Button size="sm" icon={<Plus size={16} />} onClick={() => setPortDialog({ open: true, stationId: station.station_id, port: null })} disabled={!station.is_active}>Add port</Button><IconButton label={`Edit ${station.name}`} onClick={() => setStationDialog({ open: true, station })}><Pencil size={17} /></IconButton><IconButton label={`Deactivate ${station.name}`} variant="danger" onClick={() => setDeleteTarget({ kind: 'station', station })} disabled={!station.is_active}><Trash2 size={17} /></IconButton></div>
                     </div>
+
+                    {expandedMaintenanceStation === station.station_id && (
+                      <div className="border-t border-[var(--line)] p-4 sm:p-5">
+                        {!maintenanceByStation[station.station_id] ? (
+                          <LoadingState compact label="Loading maintenance history" />
+                        ) : maintenanceByStation[station.station_id].length === 0 ? (
+                          <EmptyState compact title="No maintenance scheduled" description="Use the calendar icon on a port to schedule a window." icon={<CalendarClock size={20} />} />
+                        ) : (
+                          <div className="flex flex-col gap-2">
+                            {maintenanceByStation[station.station_id].map((schedule) => {
+                              const port = station.ports?.find((candidate) => candidate.port_id === schedule.port_id);
+                              return (
+                                <div key={schedule.maintenance_id} className="flex flex-col gap-2 rounded-lg border border-[var(--line)] p-3 sm:flex-row sm:items-center sm:justify-between">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2"><span className="font-bold">{port ? `Port ${port.qr_code}` : shortId(schedule.port_id)}</span><Badge tone={maintenanceTone(schedule.status)}>{schedule.status}</Badge></div>
+                                    <p className="mt-0.5 text-xs text-[var(--steel)]">{formatDateTime(schedule.start_time)} – {formatDateTime(schedule.end_time)}</p>
+                                  </div>
+                                  {schedule.status === 'Active' && port?.status === 'Maintenance' && (
+                                    <Button size="sm" variant="secondary" onClick={() => void handleCompleteMaintenance(station.station_id, schedule.maintenance_id)} isLoading={completingMaintenanceId === schedule.maintenance_id}>Clear bay</Button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="border-t border-[var(--line)] bg-[#fafbfa] p-4 sm:p-5">
                       {station.ports?.length ? (
@@ -142,7 +228,7 @@ export default function OperatorDashboard() {
                               <div key={port.port_id} className="rounded-[var(--radius-md)] border border-[var(--line)] bg-white p-4">
                                 <div className="flex items-start justify-between gap-3"><div><p className="font-display font-bold">{port.connector_type} · {port.charger_type}</p><p className="font-data mt-1 truncate text-xs text-[var(--steel)]" title={port.qr_code}>QR {port.qr_code}</p></div><Badge tone={statusTone(port.status)}>{port.status}</Badge></div>
                                 {warning && <div className="mt-3 flex flex-wrap gap-1.5">{port.has_health_warning && <Badge tone="warning">Health warning</Badge>}{port.has_blocked_warning && <Badge tone="warning">Blocked bay</Badge>}{port.is_pending_maintenance && <Badge tone="danger">Pending maintenance</Badge>}</div>}
-                                <div className="mt-4 flex justify-end gap-2"><IconButton label={`Edit port ${port.qr_code}`} onClick={() => setPortDialog({ open: true, stationId: station.station_id, port })}><Pencil size={16} /></IconButton><IconButton label={`Remove port ${port.qr_code}`} variant="danger" onClick={() => setDeleteTarget({ kind: 'port', port, stationName: station.name })} disabled={!port.is_active}><Trash2 size={16} /></IconButton></div>
+                                <div className="mt-4 flex justify-end gap-2"><IconButton label={`Schedule maintenance for port ${port.qr_code}`} onClick={() => setMaintenanceDialog({ open: true, port })} disabled={port.status === 'Maintenance'}><CalendarClock size={16} /></IconButton><IconButton label={`Edit port ${port.qr_code}`} onClick={() => setPortDialog({ open: true, stationId: station.station_id, port })}><Pencil size={16} /></IconButton><IconButton label={`Remove port ${port.qr_code}`} variant="danger" onClick={() => setDeleteTarget({ kind: 'port', port, stationName: station.name })} disabled={!port.is_active}><Trash2 size={16} /></IconButton></div>
                               </div>
                             );
                           })}
@@ -159,6 +245,21 @@ export default function OperatorDashboard() {
 
       <StationFormDialog open={stationDialog.open} companyId={companyId} station={stationDialog.station} onClose={() => setStationDialog({ open: false, station: null })} onSuccess={(_station, mode) => { setStationDialog({ open: false, station: null }); void refresh(); pushToast({ title: mode === 'created' ? 'Station created' : 'Station updated', tone: 'success' }); }} />
       <PortFormDialog open={portDialog.open} stations={stations} stationId={portDialog.stationId} port={portDialog.port} onClose={() => setPortDialog({ open: false, stationId: '', port: null })} onSuccess={(_port, mode) => { setPortDialog({ open: false, stationId: '', port: null }); void refresh(); pushToast({ title: mode === 'created' ? 'Charging port added' : 'Charging port updated', tone: 'success' }); }} />
+      <MaintenanceDialog
+        open={maintenanceDialog.open}
+        port={maintenanceDialog.port}
+        onClose={() => setMaintenanceDialog({ open: false, port: null })}
+        onSuccess={(schedule) => {
+          setMaintenanceDialog({ open: false, port: null });
+          setMaintenanceByStation((current) => {
+            const stationId = stations.find((station) => station.ports?.some((port) => port.port_id === schedule.port_id))?.station_id;
+            if (!stationId || !current[stationId]) return current;
+            return { ...current, [stationId]: [schedule, ...current[stationId]] };
+          });
+          void refresh();
+          pushToast({ title: 'Maintenance scheduled', tone: 'success' });
+        }}
+      />
       <ConfirmDialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onConfirm={() => void handleDelete()} title={`Remove ${deleteName}?`} description={<><strong>{deleteName}</strong> will be marked inactive rather than erased. The backend may reject this action while reservations, charging, or waitlist work is still active.</>} confirmLabel={deleteTarget?.kind === 'station' ? 'Deactivate station' : 'Remove port'} isLoading={isDeleting} />
     </div>
   );

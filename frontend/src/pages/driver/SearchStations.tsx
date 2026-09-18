@@ -5,9 +5,9 @@ import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 import 'leaflet/dist/leaflet.css';
-import { ArrowRight, Clock3, Filter, Heart, List, LocateFixed, Map, MapPin, PlugZap, Search, Zap } from 'lucide-react';
+import { ArrowRight, Clock3, Filter, Heart, History, List, LocateFixed, Map, MapPin, PlugZap, Search, X, Zap } from 'lucide-react';
 import { favoriteService, searchService } from '../../services/api';
-import type { Favorite, Station } from '../../types';
+import type { Favorite, SearchHistoryEntry, Station } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency } from '../../lib/format';
 import { MOCK_USER_LAT, MOCK_USER_LNG } from '../../lib/geo';
@@ -51,6 +51,7 @@ export function SearchStations() {
   const [stations, setStations] = useState<Station[]>([]);
   const [recentStations, setRecentStations] = useState<Station[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
   const [fastOnly, setFastOnly] = useState(false);
   const [connectorType, setConnectorType] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -75,14 +76,55 @@ export function SearchStations() {
 
   const loadInitial = useCallback(async () => {
     void runSearch('', false);
-    const [recentResult, favoriteResult] = await Promise.allSettled([searchService.getRecentStations(), favoriteService.getFavorites()]);
+    const [recentResult, favoriteResult, historyResult] = await Promise.allSettled([
+      searchService.getRecentStations(),
+      favoriteService.getFavorites(),
+      searchService.getHistory(),
+    ]);
     if (recentResult.status === 'fulfilled') setRecentStations(recentResult.value);
     if (favoriteResult.status === 'fulfilled') setFavorites(favoriteResult.value);
+    if (historyResult.status === 'fulfilled') setSearchHistory(historyResult.value);
   }, [runSearch]);
 
   useEffect(() => { void loadInitial(); }, [loadInitial]);
 
+  const applyHistoryEntry = (entry: SearchHistoryEntry) => {
+    const connector = entry.connector_type ?? '';
+    const fast = Boolean(entry.min_power_kw && entry.min_power_kw >= 50);
+    setConnectorType(connector);
+    setFastOnly(fast);
+    void runSearch(connector, fast);
+  };
+
+  const handleClearHistory = async () => {
+    setSearchHistory([]);
+    try {
+      await searchService.clearHistory();
+    } catch {
+      // Best-effort - a stale local list just re-populates next visit.
+    }
+  };
+
+  const historyLabel = (entry: SearchHistoryEntry) => {
+    const parts = [entry.connector_type ?? 'Any connector'];
+    if (entry.min_power_kw) parts.push(`${entry.min_power_kw}kW+`);
+    return parts.join(' · ');
+  };
+
   const selectedStation = useMemo(() => stations.find((station) => station.station_id === selectedStationId), [selectedStationId, stations]);
+
+  const recentSearchChips = useMemo(() => {
+    const seen = new Set<string>();
+    const chips: SearchHistoryEntry[] = [];
+    for (const entry of searchHistory) {
+      const key = `${entry.connector_type ?? ''}|${entry.min_power_kw ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      chips.push(entry);
+      if (chips.length === 6) break;
+    }
+    return chips;
+  }, [searchHistory]);
 
   return (
     <div className="flex flex-col gap-7 enter-up">
@@ -103,6 +145,18 @@ export function SearchStations() {
         </div>
         <Button type="submit" variant="primary" size="lg" icon={<Search size={18} />} isLoading={isLoading}>Search stations</Button>
       </form>
+
+      {recentSearchChips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]"><History size={14} /> Recent searches</span>
+          {recentSearchChips.map((entry) => (
+            <button key={entry.search_id} type="button" className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs font-bold text-[var(--steel-dark)] transition hover:border-[var(--teal)] hover:text-[var(--teal-dark)]" onClick={() => applyHistoryEntry(entry)}>
+              {historyLabel(entry)}
+            </button>
+          ))}
+          <button type="button" className="flex items-center gap-1 text-xs font-bold text-[var(--steel)] hover:text-[var(--red)]" onClick={() => void handleClearHistory()}><X size={13} /> Clear</button>
+        </div>
+      )}
 
       <div className="flex rounded-xl border border-[var(--line)] bg-white p-1 lg:hidden" aria-label="Search result view">
         <button type="button" className={`flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg text-sm font-bold ${mobileView === 'list' ? 'bg-[var(--night)] text-white' : 'text-[var(--steel)]'}`} onClick={() => setMobileView('list')}><List size={17} /> List</button>
