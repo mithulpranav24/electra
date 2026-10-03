@@ -569,7 +569,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
         fastapi_req.client.host = "127.0.0.1"
 
         # Attempt 1: Reserve port 1, cancel with "Faulty Charger" -> waiver 1 granted
-        res1 = create_reservation(ReservationCreate(port_id=port1_id, vehicle_id=veh_id), fastapi_req, db, user_obj)
+        res1 = create_reservation(ReservationCreate(port_id=str(port1_id), vehicle_id=str(veh_id)), fastapi_req, db, user_obj)
         cancel_reservation(reservation_id=res1.reservation_id, cancel_req=CancelReservationRequest(reason="Faulty Charger"), db=db, current_user=user_obj)
         db.refresh(user_obj)
 
@@ -578,7 +578,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
         assert waiver1.reason == "Faulty Charger"
 
         # Attempt 2: Immediate re-reserve at same station -> should NOT be blocked by cooldown (cooldown_minutes becomes 0)
-        res2 = create_reservation(ReservationCreate(port_id=port2_id, vehicle_id=veh_id), fastapi_req, db, user_obj)
+        res2 = create_reservation(ReservationCreate(port_id=str(port2_id), vehicle_id=str(veh_id)), fastapi_req, db, user_obj)
         assert res2 is not None
 
         # Cancel attempt 2 with "Blocked Bay" -> waiver 2 granted
@@ -588,7 +588,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
         assert waiver2 is not None
 
         # Attempt 3: Re-reserve at port 1 and cancel -> waiver limit (2 in 24h) reached, no 3rd waiver
-        res3 = create_reservation(ReservationCreate(port_id=port1_id, vehicle_id=veh_id), fastapi_req, db, user_obj)
+        res3 = create_reservation(ReservationCreate(port_id=str(port1_id), vehicle_id=str(veh_id)), fastapi_req, db, user_obj)
         assert res3 is not None
 
         cancel_reservation(reservation_id=res3.reservation_id, cancel_req=CancelReservationRequest(reason="Faulty Charger"), db=db, current_user=user_obj)
@@ -598,7 +598,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
 
         # Attempt 4: Re-reserve immediately -> MUST fail with cooldown exception (400)
         with pytest.raises(HTTPException) as exc_info:
-            create_reservation(ReservationCreate(port_id=port2_id, vehicle_id=veh_id), fastapi_req, db, user_obj)
+            create_reservation(ReservationCreate(port_id=str(port2_id), vehicle_id=str(veh_id)), fastapi_req, db, user_obj)
         assert exc_info.value.status_code == 400
         assert "cooldown" in exc_info.value.detail.lower()
     finally:
