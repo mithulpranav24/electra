@@ -77,27 +77,72 @@ class UserService:
 
     @staticmethod
     def get_dashboard_data(db: Session, user_id: UUID) -> dict:
+        from app.models.session import ChargingSession
+        from app.models.station import ChargingPort, Station
+        from app.services.session_service import compute_snapshot
+
         user = UserService.get_user_by_id(db, user_id)
         
         active_res = db.query(Reservation).filter(Reservation.user_id == user_id, Reservation.status == 'Active').count()
         upcoming_res = db.query(Reservation).filter(Reservation.user_id == user_id, Reservation.status == 'Confirmed').count()
         unpaid_invoices = db.query(Invoice).filter(Invoice.user_id == user_id, Invoice.is_paid == False).count()
-        
+
+        # Real total energy delivered across all completed, non-aborted sessions for this user
+
+        completed_sessions = (
+            db.query(ChargingSession, Vehicle, ChargingPort, Station)
+            .join(Reservation, ChargingSession.reservation_id == Reservation.reservation_id)
+            .join(Vehicle, Reservation.vehicle_id == Vehicle.vehicle_id)
+            .join(ChargingPort, Reservation.port_id == ChargingPort.port_id)
+            .join(Station, ChargingPort.station_id == Station.station_id)
+            .filter(
+                Reservation.user_id == user_id,
+                ChargingSession.end_time.isnot(None),
+                ChargingSession.is_aborted.is_(False),
+            )
+            .all()
+        )
+        total_kwh = sum(
+            float(compute_snapshot(s, v, p, st, s.end_time)["energy_delivered_kwh"])
+            for s, v, p, st in completed_sessions
+        )
+
+
+        # Last 5 completed sessions with station/invoice info
+        recent_sessions = (
+            db.query(ChargingSession, Reservation, Station, Invoice)
+            .join(Reservation, ChargingSession.reservation_id == Reservation.reservation_id)
+            .join(ChargingPort, Reservation.port_id == ChargingPort.port_id)
+            .join(Station, ChargingPort.station_id == Station.station_id)
+            .outerjoin(Invoice, Invoice.charging_session_id == ChargingSession.session_id)
+            .filter(
+                Reservation.user_id == user_id,
+                ChargingSession.end_time.isnot(None),
+                ChargingSession.is_aborted.is_(False),
+            )
+            .order_by(ChargingSession.end_time.desc())
+            .limit(5)
+            .all()
+        )
+
+
+        recent_activity = []
+        for session, reservation, station, invoice in recent_sessions:
+            recent_activity.append({
+                "id": str(session.session_id),
+                "type": "charge",
+                "title": "Charging Session",
+                "location": station.name,
+                "date": session.end_time.strftime("%Y-%m-%d %H:%M") if session.end_time else "Unknown",
+                "amount": f"-₹{float(invoice.total_amount):.2f}" if invoice else "-₹0.00",
+                "status": "completed",
+            })
+
         return {
             "active_sessions": active_res,
             "upcoming_bookings": upcoming_res,
             "unpaid_invoices": unpaid_invoices,
-            "energy_charged_kwh": 42.5,
-            "recent_activity": [
-                {
-                    "id": "1",
-                    "type": "charge",
-                    "title": "Charging Session",
-                    "location": "Downtown Hub",
-                    "date": "Today, 10:30 AM",
-                    "amount": "-$12.50",
-                    "status": "completed"
-                }
-            ]
+            "energy_charged_kwh": round(float(total_kwh), 2),
+            "recent_activity": recent_activity,
         }
 

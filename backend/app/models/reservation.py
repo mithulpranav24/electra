@@ -1,7 +1,13 @@
 import uuid
 from sqlalchemy import Column, String, Boolean, DateTime, Numeric, ForeignKey, func, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ENUM, UUID
 from app.core.database import Base
+
+reservation_status_enum = ENUM(
+    'Confirmed', 'Active', 'Expired', 'Cancelled', 'Completed',
+    name='reservation_status_enum',
+    create_type=False,
+)
 
 class Reservation(Base):
     __tablename__ = 'reservations'
@@ -9,7 +15,7 @@ class Reservation(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="RESTRICT"), nullable=False)
     vehicle_id = Column(UUID(as_uuid=True), ForeignKey("vehicles.vehicle_id", ondelete="RESTRICT"), nullable=False)
     port_id = Column(UUID(as_uuid=True), ForeignKey("charging_ports.port_id", ondelete="RESTRICT"), nullable=False)
-    status = Column(String, nullable=False, default='Confirmed')
+    status = Column(reservation_status_enum, nullable=False, default='Confirmed')
     is_extended = Column(Boolean, nullable=False, default=False)
     is_from_waitlist = Column(Boolean, nullable=False, default=False)
     waitlist_joined_at = Column(DateTime, nullable=True)

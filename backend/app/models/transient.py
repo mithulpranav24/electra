@@ -49,3 +49,13 @@ class RecentStation(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     station_id = Column(UUID(as_uuid=True), ForeignKey("stations.station_id", ondelete="CASCADE"), nullable=False)
     viewed_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+class CooldownWaiver(Base):
+    __tablename__ = 'cooldown_waivers'
+    waiver_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    reservation_id = Column(UUID(as_uuid=True), ForeignKey("reservations.reservation_id", ondelete="CASCADE"), nullable=False)
+    station_id = Column(UUID(as_uuid=True), ForeignKey("stations.station_id", ondelete="CASCADE"), nullable=False)
+    reason = Column(String(100), nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
+

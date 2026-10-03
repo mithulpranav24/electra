@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from typing import List
+from typing import List, Optional
 from decimal import Decimal
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -13,7 +13,7 @@ from app.models.station import Station, ChargingPort
 from app.models.reservation import Reservation
 from app.models.wallet import WalletTransaction
 from app.models.vehicle import Vehicle
-from app.schemas.reservation_schema import ReservationCreate, ReservationResponse
+from app.schemas.reservation_schema import ReservationCreate, ReservationResponse, CancelReservationRequest
 from app.services.audit_service import log_audit_event
 from app.services.notification_service import create_notification
 from app.services.waitlist_service import WaitlistService
@@ -128,6 +128,38 @@ def create_reservation(
     if existing:
         raise HTTPException(status_code=400, detail="You already have an active reservation")
 
+    # FR-9: Compute cooldown_minutes (trusted account waiver logic)
+    # Target station determination:
+    target_port_id = request.port_id
+    target_station_id = request.station_id
+    if target_port_id and not target_station_id:
+        port_row = db.query(ChargingPort).filter(ChargingPort.port_id == target_port_id).first()
+        if port_row:
+            target_station_id = str(port_row.station_id)
+
+    from app.models.transient import CooldownWaiver as _CW
+    _now_ts = datetime.now(timezone.utc).replace(tzinfo=None)
+    _60m_ago = _now_ts - timedelta(minutes=60)
+    cooldown_minutes = 60
+    if target_station_id:
+        recent_cancellations = db.query(Reservation).join(ChargingPort).filter(
+            Reservation.user_id == current_user.user_id,
+            ChargingPort.station_id == target_station_id,
+            Reservation.status == "Cancelled",
+            Reservation.status_updated_at >= _60m_ago
+        ).all()
+        if recent_cancellations:
+            cancellation_res_ids = [c.reservation_id for c in recent_cancellations]
+            waived_count = db.query(_CW).filter(
+                _CW.user_id == current_user.user_id,
+                _CW.reservation_id.in_(cancellation_res_ids)
+            ).count()
+            if waived_count == len(recent_cancellations):
+                cooldown_minutes = 0
+        else:
+            cooldown_minutes = 60
+
+
     # Check wallet balance
     if current_user.wallet_balance < ESCROW_AMOUNT:
         raise HTTPException(
@@ -182,7 +214,7 @@ def create_reservation(
                 "p_port_id": target_port_id,
                 "p_vehicle_id": request.vehicle_id,
                 "p_grace_period_minutes": SLA_TIMEOUT_MINUTES,
-                "p_cooldown_minutes": 60, # Standard cooldown
+                "p_cooldown_minutes": cooldown_minutes,
                 "p_ip_address": str(ip_address)
             }
         )
@@ -255,16 +287,17 @@ def get_active_reservations(
 def cancel_reservation(
     reservation_id: str,
     fastapi_req: Request,
+    cancel_req: Optional[CancelReservationRequest] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     DD-24: Cancellation Penalty Logic
     Escrow is FORFEITED unless ALL of the following are true:
-      (A) Reservation was held for < FREE_CANCEL_HOLD_MINUTES (5 min), AND
-          it is the user's 1st free cancellation in the last 24 hours,
-      OR
-      (B) A valid 'Faulty Charger' exemption claim exists for this reservation's port.
+      (A) Trusted driver cancelling for 'Faulty Charger' or 'Blocked Bay' within 5 min (up to 2 waivers/24h), OR
+      (B) Reservation was held for < FREE_CANCEL_HOLD_MINUTES (5 min), AND
+          it is the user's 1st free cancellation in the last 24 hours, OR
+      (C) A valid 'Faulty Charger' exemption claim exists for this reservation's port.
     """
     try:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -316,36 +349,58 @@ def cancel_reservation(
             Reservation.user_id == current_user.user_id
         ).first()
 
+
         # Re-check status after acquiring lock (guard against race conditions)
         if reservation.status != "Confirmed":
             raise HTTPException(status_code=400, detail="Only confirmed reservations can be cancelled")
 
-        # --- DD-24: Determine if escrow should be refunded or forfeited ---
-
-        # Check if user is a Trusted Account (>100 completed sessions)
+        # --- DD-24 / TASK-6: Determine if escrow should be refunded or forfeited ---
         from app.models.session import ChargingSession
+        from app.models.transient import CooldownWaiver, FaultExemptionClaim
+
         successful_sessions = db.query(ChargingSession).join(Reservation).filter(
             Reservation.user_id == current_user.user_id,
-            ChargingSession.end_time.isnot(None)
+            ChargingSession.end_time.isnot(None),
+            ChargingSession.is_aborted.is_(False)
         ).count()
-        is_trusted_account = successful_sessions > 100
+        account_age_days = (now - current_user.created_at).days if current_user.created_at else 0
+        is_trusted_account = successful_sessions >= 3 and account_age_days >= 7
+
+        hold_duration_minutes = (now - reservation.created_at).total_seconds() / 60
+        twenty_four_hours_ago = now - timedelta(hours=24)
+
+        raw_reason = cancel_req.reason.strip() if (cancel_req and cancel_req.reason) else None
+        reason_str = raw_reason if raw_reason and raw_reason not in ["User cancelled", "Standard"] else None
+        is_fault_or_blocked = reason_str in ["Faulty Charger", "Blocked Bay"] if reason_str else False
+
+        # TASK-6: Cooldown Waiver for Trusted Drivers
+        waiver_applied = False
+        if is_trusted_account and hold_duration_minutes <= 5.0 and is_fault_or_blocked:
+            waiver_count = db.query(CooldownWaiver).filter(
+                CooldownWaiver.user_id == current_user.user_id,
+                CooldownWaiver.created_at >= twenty_four_hours_ago
+            ).count()
+            if waiver_count < 2:
+                waiver_applied = True
+                new_waiver = CooldownWaiver(
+                    user_id=current_user.user_id,
+                    reservation_id=reservation.reservation_id,
+                    station_id=port.station_id if port else station.station_id,
+                    reason=reason_str
+                )
+                db.add(new_waiver)
 
         cancel_window_minutes = 10 if is_trusted_account else FREE_CANCEL_HOLD_MINUTES
-        hold_duration_minutes = (now - reservation.created_at).total_seconds() / 60
         is_short_hold = hold_duration_minutes < cancel_window_minutes
 
-        # Check if user has used their free cancellation in the last 24 hours
-        twenty_four_hours_ago = now - timedelta(hours=24)
         prior_free_cancels = db.query(Reservation).filter(
             Reservation.user_id == current_user.user_id,
             Reservation.status == "Cancelled",
-            Reservation.cancellation_reason == "User cancelled (Free)",
+            Reservation.cancellation_reason.like("User cancelled%Free%"),
             Reservation.status_updated_at >= twenty_four_hours_ago
         ).count()
         is_first_free_cancel = prior_free_cancels == 0
 
-        # Check for valid Faulty Charger exemption claim for this port
-        from app.models.transient import FaultExemptionClaim
         faulty_charger_claim = db.query(FaultExemptionClaim).filter(
             FaultExemptionClaim.user_id == current_user.user_id,
             FaultExemptionClaim.port_id == reservation.port_id
@@ -353,13 +408,17 @@ def cancel_reservation(
         is_faulty_charger = faulty_charger_claim is not None
 
         # Apply refund or penalty
-        if (is_short_hold and is_first_free_cancel) or is_faulty_charger:
-            # Eligible for escrow refund. wallet_balance is maintained by a DB
-            # trigger (trg_update_wallet_balance) as SUM(WALLET_TRANSACTIONS) for
-            # the user, so inserting this ledger row below is what actually
-            # updates the balance - writing user.wallet_balance directly here
-            # would just be discarded by the trigger's recalculation.
-            cancel_reason = "User cancelled (Free)"
+        if waiver_applied:
+            cancel_reason = f"User cancelled ({reason_str}) (Waiver)" if reason_str else "User cancelled (Waiver)"
+            wallet_tx = WalletTransaction(
+                user_id=current_user.user_id,
+                amount=ESCROW_AMOUNT,
+                transaction_type="Escrow Release",
+                reference_id=reservation.reservation_id
+            )
+            response_message = f"Reservation cancelled and escrow refunded. Cooldown waiver recorded for {reason_str}. (Trusted: {is_trusted_account})"
+        elif (is_short_hold and is_first_free_cancel) or is_faulty_charger:
+            cancel_reason = f"User cancelled ({reason_str}) (Free)" if reason_str else "User cancelled (Free)"
             wallet_tx = WalletTransaction(
                 user_id=current_user.user_id,
                 amount=ESCROW_AMOUNT,
@@ -368,8 +427,7 @@ def cancel_reservation(
             )
             response_message = f"Reservation cancelled and escrow refunded. (Trusted: {is_trusted_account})"
         else:
-            # Escrow is forfeited as cancellation penalty
-            cancel_reason = "User cancelled (Penalty)"
+            cancel_reason = f"User cancelled ({reason_str}) (Penalty)" if reason_str else "User cancelled (Penalty)"
             wallet_tx = WalletTransaction(
                 user_id=current_user.user_id,
                 amount=Decimal("0.00"),  # Escrow already deducted; no release
@@ -402,6 +460,7 @@ def cancel_reservation(
 
         db.commit()
         return {"success": True, "message": response_message}
+
 
     except HTTPException as e:
         db.rollback()

@@ -273,10 +273,11 @@ export const reservationService = {
     const { data } = await api.post<Reservation>('/reservations', payload);
     return data;
   },
-  cancel: async (reservationId: string): Promise<{ message?: string }> => {
-    const { data } = await api.post<{ message?: string }>(`/reservations/${reservationId}/cancel`);
+  cancel: async (reservationId: string, reason?: string): Promise<{ message?: string }> => {
+    const { data } = await api.post<{ message?: string }>(`/reservations/${reservationId}/cancel`, reason ? { reason } : {});
     return data;
   },
+
 };
 
 export const waitlistService = {
@@ -299,7 +300,14 @@ export const waitlistService = {
 };
 
 export const sessionService = {
-  start: async (payload: { reservation_id: string; initial_battery_percentage: number; target_battery_percentage: number }): Promise<ChargingSessionStatus> => {
+  start: async (payload: {
+    reservation_id: string;
+    initial_battery_percentage: number;
+    target_battery_percentage: number;
+    qr_code: string;
+    latitude: number;
+    longitude: number;
+  }): Promise<ChargingSessionStatus> => {
     const { data } = await api.post<ChargingSessionStatus>('/sessions/start', payload);
     return data;
   },
@@ -309,6 +317,14 @@ export const sessionService = {
   },
   stop: async (): Promise<Invoice> => {
     const { data } = await api.post<Invoice>('/sessions/stop');
+    return data;
+  },
+  hardwareAck: async (sessionId: string): Promise<{ message?: string }> => {
+    const { data } = await api.post<{ message?: string }>(`/sessions/${sessionId}/hardware-ack`);
+    return data;
+  },
+  challengePort: async (portId: string, payload: { latitude: number; longitude: number; qr_code: string }): Promise<{ message?: string }> => {
+    const { data } = await api.post<{ message?: string }>(`/sessions/challenge/${portId}`, payload);
     return data;
   },
 };

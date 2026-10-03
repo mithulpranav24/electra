@@ -11,7 +11,9 @@ import { WaitlistStatusCard } from '../../components/WaitlistStatusCard';
 import { Badge } from '../../ui/Badge';
 import { statusTone } from '../../lib/status';
 import { Button } from '../../ui/Button';
-import { ConfirmDialog } from '../../ui/ConfirmDialog';
+import { Dialog } from '../../ui/Dialog';
+import { Field } from '../../ui/Field';
+
 import { EmptyState, ErrorState, LoadingState } from '../../ui/Feedback';
 import { PageHeader, SectionHeader } from '../../ui/Page';
 import { useToast } from '../../ui/ToastContext';
@@ -31,7 +33,9 @@ export function Sessions() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [cancelling, setCancelling] = useState<Reservation | null>(null);
+  const [cancelReason, setCancelReason] = useState('Standard');
   const [isCancelling, setIsCancelling] = useState(false);
+
   const [isLeavingWaitlist, setIsLeavingWaitlist] = useState(false);
   const [isConfirmingOffer, setIsConfirmingOffer] = useState(false);
   const [startingReservation, setStartingReservation] = useState<Reservation | null>(null);
@@ -82,7 +86,13 @@ export function Sessions() {
     return () => clearInterval(interval);
   }, [activeSessionId]);
 
-  const handleStartSession = async (initialPercentage: number, targetPercentage: number) => {
+  const handleStartSession = async (
+    initialPercentage: number,
+    targetPercentage: number,
+    qrCode: string,
+    latitude: number,
+    longitude: number,
+  ) => {
     if (!startingReservation) return;
     setIsStartingSession(true);
     try {
@@ -90,13 +100,26 @@ export function Sessions() {
         reservation_id: startingReservation.reservation_id,
         initial_battery_percentage: initialPercentage,
         target_battery_percentage: targetPercentage,
+        qr_code: qrCode,
+        latitude,
+        longitude,
       });
       setActiveSession(session);
       setStartingReservation(null);
       await loadReservations();
-      pushToast({ title: 'Charging started', message: 'Progress updates automatically as energy is delivered.', tone: 'success' });
+      pushToast({ title: 'Charging started', message: 'Waiting for charger handshake...', tone: 'success' });
+      // FR-15: simulate hardware handshake ack after a 2-second delay
+      if (session?.session_id) {
+        setTimeout(async () => {
+          try {
+            await sessionService.hardwareAck(session.session_id);
+          } catch {
+            /* worker will handle timeout */
+          }
+        }, 2000);
+      }
     } catch (startError) {
-      pushToast({ title: 'Couldn’t start charging', message: getErrorMessage(startError, 'Check your wallet balance and try again.'), tone: 'error' });
+      pushToast({ title: 'Couldn\'t start charging', message: getErrorMessage(startError, 'Check your wallet balance and try again.'), tone: 'error' });
     } finally {
       setIsStartingSession(false);
     }
@@ -166,16 +189,19 @@ export function Sessions() {
     if (!cancelling) return;
     setIsCancelling(true);
     try {
-      await reservationService.cancel(cancelling.reservation_id);
+      const reasonToSend = cancelReason === 'Standard' ? undefined : cancelReason;
+      const res = await reservationService.cancel(cancelling.reservation_id, reasonToSend);
       setCancelling(null);
+      setCancelReason('Standard');
       await loadReservations();
-      pushToast({ title: 'Reservation cancelled', message: 'Your wallet activity shows whether the escrow was refunded or forfeited.', tone: 'success' });
+      pushToast({ title: 'Reservation cancelled', message: res.message || 'Your wallet activity shows whether the escrow was refunded or forfeited.', tone: 'success' });
     } catch (cancelError) {
       pushToast({ title: 'Couldn’t cancel the reservation', message: getErrorMessage(cancelError, 'The reservation state may have changed.'), tone: 'error' });
     } finally {
       setIsCancelling(false);
     }
   };
+
 
   return (
     <div className="flex flex-col gap-7 enter-up">
@@ -246,26 +272,92 @@ export function Sessions() {
                 <span className={`flex size-10 shrink-0 items-center justify-center rounded-full ${invoice.is_paid ? 'bg-[var(--teal-soft)] text-[var(--teal-dark)]' : 'bg-[var(--red-soft)] text-[var(--red)]'}`}><ReceiptText size={18} /></span>
                 <div className="min-w-0 flex-1"><p className="truncate font-bold">{formatDateTime(invoice.created_at)}</p><p className="font-data text-xs text-[var(--steel)]" title={invoice.invoice_id}>{shortId(invoice.invoice_id, 12)}</p></div>
                 <div className="text-right"><p className="font-data font-bold">{formatCurrency(invoice.total_amount)}</p><Badge tone={invoice.is_paid ? 'success' : 'danger'}>{invoice.is_paid ? 'Paid' : 'Unpaid'}</Badge></div>
+                <a
+                  href={`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1'}/invoices/${invoice.invoice_id}/pdf`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-2 flex items-center gap-1 rounded-md border border-[var(--line)] bg-[var(--paper)] px-2.5 py-1.5 text-xs font-semibold text-[var(--ink)] hover:bg-[var(--surface-muted)] transition-colors"
+                  title="Download PDF"
+                  onClick={(e) => {
+                    const token = localStorage.getItem('token');
+                    if (token) {
+                      e.preventDefault();
+                      const url = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1'}/invoices/${invoice.invoice_id}/pdf`;
+                      fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+                        .then(r => {
+                          if (!r.ok) throw new Error('Invoice PDF not available');
+                          return r.blob();
+                        })
+                        .then(blob => {
+                          const a = document.createElement('a');
+                          a.href = URL.createObjectURL(blob);
+                          a.download = `electra-invoice-${invoice.invoice_id.slice(0, 8).toUpperCase()}.pdf`;
+                          a.click();
+                        })
+                        .catch((pdfErr) => {
+                          pushToast({
+                            title: 'Download failed',
+                            message: getErrorMessage(pdfErr, 'Could not download invoice PDF.'),
+                            tone: 'error',
+                          });
+                        });
+                    }
+                  }}
+
+                >
+                  ↓ PDF
+                </a>
               </div>
             ))}
           </div>
         )}
       </section>
 
-      <ConfirmDialog
+      <Dialog
         open={Boolean(cancelling)}
         onClose={() => setCancelling(null)}
-        onConfirm={() => void handleCancel()}
         title="Cancel this reservation?"
-        description="The backend decides whether the ₹1,000 escrow is refunded based on how long the port was held and your recent cancellation history. If the free-cancellation conditions are not met, the escrow is forfeited."
-        confirmLabel="Cancel reservation"
-        isLoading={isCancelling}
-      />
+        description="The backend decides whether the ₹1,000 escrow is refunded based on how long the port was held and your recent cancellation history. Trusted accounts cancelling for a Faulty Charger or Blocked Bay within 5 minutes receive an automatic cooldown waiver."
+        size="sm"
+        preventClose={isCancelling}
+        footer={
+          <>
+            <Button onClick={() => setCancelling(null)} disabled={isCancelling}>Keep reservation</Button>
+            <Button variant="danger" onClick={() => void handleCancel()} isLoading={isCancelling}>Cancel reservation</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Field label="Cancellation Reason" hint="Select a reason for cancelling this reservation.">
+            {({ id: inputId, describedBy }) => (
+              <select
+                id={inputId}
+                aria-describedby={describedBy}
+                className="field-control"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                disabled={isCancelling}
+              >
+                <option value="Standard">Standard / Change of plans</option>
+                <option value="Faulty Charger">Faulty Charger (Hardware defect / not working)</option>
+                <option value="Blocked Bay">Blocked Bay (ICE'd or obstructed)</option>
+                <option value="Other">Other reason</option>
+              </select>
+            )}
+          </Field>
+          {(cancelReason === 'Faulty Charger' || cancelReason === 'Blocked Bay') && (
+            <div className="rounded-lg bg-[var(--amber-soft)] p-3 text-xs font-medium text-[#6f500c]">
+              Trusted accounts with cancellations under 5 minutes will receive an immediate escrow refund and a station cooldown waiver (up to 2/day).
+            </div>
+          )}
+        </div>
+      </Dialog>
+
 
       <StartSessionModal
         open={Boolean(startingReservation)}
         onClose={() => setStartingReservation(null)}
-        onConfirm={(initialPercentage, targetPercentage) => void handleStartSession(initialPercentage, targetPercentage)}
+        onConfirm={(initialPercentage, targetPercentage, qrCode, latitude, longitude) => void handleStartSession(initialPercentage, targetPercentage, qrCode, latitude, longitude)}
         isLoading={isStartingSession}
       />
     </div>
