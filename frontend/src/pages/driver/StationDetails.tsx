@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Clock3, Heart, ListPlus, MapPin, MessageSquare, PlugZap, ShieldAlert, Star, WalletCards, Zap } from 'lucide-react';
+import { ArrowLeft, Clock3, Heart, ListPlus, MapPin, MessageSquare, PlugZap, QrCode, ShieldAlert, Star, WalletCards, Zap } from 'lucide-react';
 import { useAuth } from '../../context/auth-context';
-import { favoriteService, ratingService, reservationService, searchService, vehicleService, waitlistService } from '../../services/api';
+import { favoriteService, ratingService, reservationService, searchService, sessionService, vehicleService, waitlistService } from '../../services/api';
 import type { ChargingPort, Reservation, Station, StationRatingsResponse, Vehicle, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency, formatDate, normalizeConnector, vehicleId } from '../../lib/format';
@@ -14,6 +14,8 @@ import { Alert, EmptyState, ErrorState, LoadingState } from '../../ui/Feedback';
 import { Badge } from '../../ui/Badge';
 import { statusTone } from '../../lib/status';
 import { Button, IconButton } from '../../ui/Button';
+import { Dialog } from '../../ui/Dialog';
+import { Field } from '../../ui/Field';
 import { SectionHeader } from '../../ui/Page';
 import { useToast } from '../../ui/ToastContext';
 
@@ -78,6 +80,9 @@ export function StationDetails() {
   const [isConfirmingOffer, setIsConfirmingOffer] = useState(false);
   const [ratingForm, setRatingForm] = useState({ overall_score: 0, cleanliness_score: 0, access_score: 0, experience_score: 0, comment: '' });
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
+  const [challengingPort, setChallengingPort] = useState<ChargingPort | null>(null);
+  const [challengeQr, setChallengeQr] = useState('');
+  const [isChallenging, setIsChallenging] = useState(false);
 
   const loadStation = useCallback(async () => {
     setError('');
@@ -229,6 +234,34 @@ export function StationDetails() {
     }
   };
 
+  const handleChallengePort = async () => {
+    if (!challengingPort || !challengeQr.trim()) return;
+    setIsChallenging(true);
+    try {
+      const res = await sessionService.challengePort(challengingPort.port_id, {
+        qr_code: challengeQr.trim(),
+        latitude: MOCK_USER_LAT,
+        longitude: MOCK_USER_LNG,
+      });
+      setChallengingPort(null);
+      pushToast({
+        title: 'Port Challenge',
+        message: res.message || 'Port challenge processed successfully.',
+        tone: 'success',
+      });
+      await loadStation();
+      navigate('/driver/sessions');
+    } catch (challengeErr) {
+      pushToast({
+        title: 'Challenge rejected',
+        message: getErrorMessage(challengeErr, 'Could not challenge port.'),
+        tone: 'error',
+      });
+    } finally {
+      setIsChallenging(false);
+    }
+  };
+
   if (isLoading) return <div className="surface"><LoadingState label="Loading station" /></div>;
   if (error || !data) return <ErrorState title="Station unavailable" description={error || 'The station was not found.'} onRetry={() => void loadStation()} />;
 
@@ -303,7 +336,21 @@ export function StationDetails() {
                   <div className="flex items-start justify-between gap-3"><div><h3 className="font-display text-lg font-bold">{port.connector_type}</h3><p className="mt-0.5 text-sm text-[var(--steel)]">{port.charger_type}</p></div><Badge tone={statusTone(port.status)}>{port.status}</Badge></div>
                   <p className="font-data mt-4 truncate rounded-md bg-white px-2.5 py-2 text-xs text-[var(--steel-dark)]" title={port.qr_code}>QR {port.qr_code}</p>
                   {hasWarning && <div className="mt-3 flex gap-2 rounded-lg bg-[var(--amber-soft)] p-2.5 text-xs font-semibold text-[#6f500c]"><ShieldAlert size={16} className="shrink-0" /><span>{port.has_health_warning ? 'Health issue reported' : 'Blocked bay reported'}. This port remains a manual option.</span></div>}
-                  <Button className="mt-4 w-full" variant={isAvailable ? 'primary' : 'secondary'} disabled={!isAvailable || activeReservations.length > 0} icon={<WalletCards size={16} />} onClick={() => openReservation(port)}>{isAvailable ? 'Reserve port' : 'Unavailable'}</Button>
+                  {port.status === 'Charging' && activeReservations.length === 0 ? (
+                    <Button
+                      className="mt-4 w-full"
+                      variant="secondary"
+                      icon={<ShieldAlert size={16} />}
+                      onClick={() => {
+                        setChallengingPort(port);
+                        setChallengeQr(port.qr_token || port.qr_code || '');
+                      }}
+                    >
+                      Challenge Port
+                    </Button>
+                  ) : (
+                    <Button className="mt-4 w-full" variant={isAvailable ? 'primary' : 'secondary'} disabled={!isAvailable || activeReservations.length > 0} icon={<WalletCards size={16} />} onClick={() => openReservation(port)}>{isAvailable ? 'Reserve port' : 'Unavailable'}</Button>
+                  )}
                 </article>
               );
             })}
@@ -393,6 +440,45 @@ export function StationDetails() {
         walletBalance={user?.wallet_balance ?? 0}
         isLoading={isJoiningWaitlist}
       />
+
+      <Dialog
+        open={Boolean(challengingPort)}
+        onClose={() => setChallengingPort(null)}
+        title="Challenge Port (Ghost Session)"
+        description="If this bay shows 'Charging' in the app but no vehicle is plugged in, scan or enter the port's QR code to verify hardware state. If disconnected, the ghost session will be terminated."
+        size="sm"
+        preventClose={isChallenging}
+        footer={
+          <>
+            <Button onClick={() => setChallengingPort(null)} disabled={isChallenging}>Cancel</Button>
+            <Button variant="primary" onClick={() => void handleChallengePort()} isLoading={isChallenging} disabled={!challengeQr.trim()}>Submit Challenge</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Field label="Port QR Token" hint="The unique QR code/token on the physical charger.">
+            {({ id: inputId, describedBy }) => (
+              <div className="relative">
+                <QrCode size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--steel)]" />
+                <input
+                  id={inputId}
+                  aria-describedby={describedBy}
+                  type="text"
+                  className="field-control pl-10"
+                  placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000"
+                  value={challengeQr}
+                  onChange={(e) => setChallengeQr(e.target.value)}
+                  disabled={isChallenging}
+                />
+              </div>
+            )}
+          </Field>
+          <div className="rounded-lg bg-[var(--paper-muted)] p-3 text-xs text-[var(--steel)]">
+            <span className="font-semibold text-[var(--ink)]">Geofence Check:</span> Your GPS location will be verified against the station radius (200m).
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }
+

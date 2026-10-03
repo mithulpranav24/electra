@@ -168,7 +168,52 @@ def compute_snapshot(session: ChargingSession, vehicle: Vehicle, port: ChargingP
 
 class SessionService:
     @staticmethod
-    def start_session(db: Session, current_user: User, reservation_id: UUID, initial_pct: Decimal, target_pct: Decimal, ip_address: str) -> ChargingSession:
+    def start_session(
+        db: Session,
+        current_user: User,
+        reservation_id: UUID,
+        initial_pct: Decimal,
+        target_pct: Decimal,
+        ip_address: str,
+        qr_code: str = "",
+        latitude: Optional[Decimal] = None,
+        longitude: Optional[Decimal] = None,
+    ) -> ChargingSession:
+        # FR-14: QR token and GPS proximity validation
+        if qr_code:
+            reservation_pre = db.query(Reservation).filter(
+                Reservation.reservation_id == reservation_id
+            ).first()
+            if reservation_pre:
+                port = db.query(ChargingPort).filter(
+                    ChargingPort.port_id == reservation_pre.port_id
+                ).first()
+                if port:
+                    # Validate QR token matches the port's stable token
+                    if str(port.qr_token) != qr_code and port.qr_code != qr_code:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="QR code does not match this charging port. Please scan the correct port."
+                        )
+                    # GPS proximity check — must be within 200m
+                    if latitude is not None and longitude is not None:
+                        result = db.execute(
+                            text("""
+                                SELECT ST_DWithin(
+                                    gps_coordinates,
+                                    ST_MakePoint(:lon, :lat)::geography,
+                                    200
+                                )
+                                FROM stations
+                                WHERE station_id = :station_id
+                            """),
+                            {"lat": float(latitude), "lon": float(longitude), "station_id": str(port.station_id)},
+                        ).scalar()
+                        if result is False:
+                            raise HTTPException(
+                                status_code=400,
+                                detail="You must be within 200m of the station to start a charging session."
+                            )
         try:
             db.execute(
                 text("""
@@ -213,6 +258,12 @@ class SessionService:
         if not session:
             raise HTTPException(status_code=500, detail="Failed to retrieve created session")
 
+        # FR-15: Set hardware handshake deadline — billing doesn't begin until ack arrives
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        session.hardware_acked = False
+        session.hardware_ack_deadline = now + timedelta(seconds=60)
+        db.commit()
+
         log_audit_event(
             db,
             user_id=current_user.user_id,
@@ -223,6 +274,7 @@ class SessionService:
             ip_address=str(ip_address),
         )
         return session
+
 
     @staticmethod
     def _load_active_session_context(db: Session, current_user: User):
@@ -611,3 +663,187 @@ class SessionService:
             penalized += 1
 
         return penalized
+
+    @staticmethod
+    def challenge_port(
+        db: Session,
+        challenger: User,
+        port_id: UUID,
+        latitude: Decimal,
+        longitude: Decimal,
+        qr_code: str,
+        vehicle_id: Optional[UUID] = None,
+        ip_address: str = "unknown",
+    ) -> dict:
+        """FR-32: Ghost Session Resolution / Port Challenge.
+        If a bay shows 'Charging' but vehicle is gone, challenger scans port QR within 200m.
+        If mock hardware state is Disconnected, force-terminates ghost session billing strictly up to now,
+        runs waitlist promotion, or grants challenger a 15-min reservation if no waitlist queued."""
+        # Check challenger has no active session
+        active_challenger_session = (
+            db.query(ChargingSession.session_id)
+            .join(Reservation, ChargingSession.reservation_id == Reservation.reservation_id)
+            .filter(Reservation.user_id == challenger.user_id, ChargingSession.end_time.is_(None))
+            .first()
+        )
+        if active_challenger_session:
+            raise HTTPException(status_code=400, detail="You already have an active charging session")
+
+        # Port validation
+        port = db.query(ChargingPort).filter(ChargingPort.port_id == port_id).first()
+        if not port:
+            raise HTTPException(status_code=404, detail="Port not found")
+        if port.status == "Offline":
+            raise HTTPException(status_code=400, detail="Port is offline and requires operator intervention, not a challenge")
+        if port.status in ["Maintenance"]:
+            raise HTTPException(status_code=400, detail="Port is currently in maintenance")
+        if port.status != "Charging":
+            raise HTTPException(status_code=400, detail=f"Port is currently {port.status}, not Charging")
+
+        # Geofence check: within 200m of station
+        station = db.query(Station).filter(Station.station_id == port.station_id).first()
+        if not station:
+            raise HTTPException(status_code=404, detail="Station not found")
+
+        point = f"SRID=4326;POINT({longitude} {latitude})"
+        distance = db.execute(
+            text("SELECT ST_Distance(gps_coordinates, ST_GeogFromText(:point)) FROM stations WHERE station_id = :station_id"),
+            {"point": point, "station_id": str(station.station_id)},
+        ).scalar()
+        if distance is None or distance > 200:
+            raise HTTPException(status_code=400, detail="You must be within 200m of the station to challenge this port")
+
+        # QR validation
+        if port.qr_token and str(qr_code).strip() != str(port.qr_token):
+            raise HTTPException(status_code=400, detail="Scanned QR code does not match this charging port")
+
+        # Find active session on this port
+        reservation = (
+            db.query(Reservation)
+            .filter(Reservation.port_id == port.port_id, Reservation.status == "Active")
+            .order_by(Reservation.created_at.desc())
+            .first()
+        )
+        if not reservation:
+            raise HTTPException(status_code=400, detail="No active reservation found on this port")
+
+        session = (
+            db.query(ChargingSession)
+            .filter(ChargingSession.reservation_id == reservation.reservation_id, ChargingSession.end_time.is_(None))
+            .first()
+        )
+        if not session:
+            raise HTTPException(status_code=400, detail="No active charging session found on this port")
+
+        # Query hardware state: State A / Disconnected means physically disconnected
+        hw_state = (session.hardware_state or "Disconnected").strip().lower()
+        if hw_state in ["connected", "charging", "state b", "state c"]:
+            raise HTTPException(status_code=400, detail="Hardware indicates vehicle is still connected. Challenge rejected.")
+
+        # Deadlock prevention: Acquire user locks in ascending user_id order
+        user_ids = sorted([str(reservation.user_id), str(challenger.user_id)])
+        locked_users = (
+            db.query(User)
+            .filter(User.user_id.in_([UUID(u) for u in user_ids]))
+            .with_for_update()
+            .all()
+        )
+        session_user = next((u for u in locked_users if u.user_id == reservation.user_id), None)
+        challenger_user = next((u for u in locked_users if u.user_id == challenger.user_id), challenger)
+
+        vehicle = db.query(Vehicle).filter(Vehicle.vehicle_id == reservation.vehicle_id).first()
+        port_locked = db.query(ChargingPort).with_for_update().filter(ChargingPort.port_id == port.port_id).first()
+        station_locked = db.query(Station).with_for_update(read=True, of=Station).filter(Station.station_id == port.station_id).first()
+        session_locked = db.query(ChargingSession).with_for_update().filter(ChargingSession.session_id == session.session_id).first()
+        reservation_locked = db.query(Reservation).with_for_update().filter(Reservation.reservation_id == reservation.reservation_id).first()
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # Terminate the ghost session billing strictly up to now
+        SessionService._settle_and_finalize(
+            db, session_locked, reservation_locked, vehicle, port_locked, station_locked, session_user, now,
+            ip_address=ip_address,
+        )
+
+        log_audit_event(
+            db,
+            user_id=challenger.user_id,
+            action="Port Challenge Successful",
+            entity_type="CHARGING_PORTS",
+            entity_id=port.port_id,
+            details={"ghost_session_id": str(session.session_id), "ghost_user_id": str(reservation.user_id)},
+            ip_address=str(ip_address),
+            commit=False,
+        )
+
+        # Check if port was claimed by waitlist promotion
+        created_res_id = None
+        if port_locked.status == "Pending Waitlist":
+            msg = "Ghost session terminated. The port has been offered to the next driver in the waitlist queue."
+        else:
+            # Challenger gets a 15-minute reservation if eligible
+            challenger_veh = None
+            if vehicle_id:
+                challenger_veh = db.query(Vehicle).filter(
+                    Vehicle.vehicle_id == vehicle_id,
+                    Vehicle.user_id == challenger.user_id,
+                    Vehicle.is_active.is_(True),
+                ).first()
+            if not challenger_veh:
+                challenger_veh = db.query(Vehicle).filter(
+                    Vehicle.user_id == challenger.user_id,
+                    Vehicle.connector_type == port.connector_type,
+                    Vehicle.is_active.is_(True),
+                ).first()
+            if not challenger_veh:
+                challenger_veh = db.query(Vehicle).filter(
+                    Vehicle.user_id == challenger.user_id,
+                    Vehicle.is_active.is_(True),
+                ).first()
+
+            if challenger_veh and challenger_user.wallet_balance >= ESCROW_AMOUNT:
+                try:
+                    db.execute(
+                        text("""
+                            CALL sp_CreateReservation(
+                                :p_user_id,
+                                :p_port_id,
+                                :p_vehicle_id,
+                                :p_grace_period_minutes,
+                                :p_cooldown_minutes,
+                                :p_ip_address
+                            )
+                        """),
+                        {
+                            "p_user_id": challenger.user_id,
+                            "p_port_id": str(port.port_id),
+                            "p_vehicle_id": challenger_veh.vehicle_id,
+                            "p_grace_period_minutes": 15,
+                            "p_cooldown_minutes": 60,
+                            "p_ip_address": str(ip_address),
+                        },
+                    )
+                    new_res = (
+                        db.query(Reservation)
+                        .filter(Reservation.user_id == challenger.user_id, Reservation.port_id == port.port_id, Reservation.status == "Confirmed")
+                        .order_by(Reservation.created_at.desc())
+                        .first()
+                    )
+                    if new_res:
+                        created_res_id = new_res.reservation_id
+                    msg = "Ghost session terminated. You have been granted a 15-minute reservation on this port."
+                except Exception:
+                    port_locked.status = "Available"
+                    msg = "Ghost session terminated. The port is now Available."
+            else:
+                port_locked.status = "Available"
+                msg = "Ghost session terminated. The port is now Available for reservation."
+
+        db.commit()
+        return {
+            "success": True,
+            "message": msg,
+            "reservation_id": created_res_id,
+            "port_status": port_locked.status,
+        }
+

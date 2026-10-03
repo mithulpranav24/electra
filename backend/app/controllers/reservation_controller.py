@@ -128,6 +128,27 @@ def create_reservation(
     if existing:
         raise HTTPException(status_code=400, detail="You already have an active reservation")
 
+    # FR-9: Compute cooldown_minutes (trusted account waiver logic)
+    # A trusted account cancelling under a faulty/blocked reason within 5 min
+    # gets p_cooldown_minutes=0 (up to 2 waivers per rolling 24 hours).
+    from app.models.session import ChargingSession as _CS
+    from app.models.transient import FaultExemptionClaim as _FEC
+    _now_ts = datetime.now(timezone.utc).replace(tzinfo=None)
+    _successful = db.query(_CS).join(Reservation).filter(
+        Reservation.user_id == current_user.user_id,
+        _CS.end_time.isnot(None)
+    ).count()
+    _age_days = (_now_ts - current_user.created_at).days
+    _is_trusted = _successful >= 3 and _age_days >= 7
+    _waiver_count = 0
+    if _is_trusted:
+        _24h_ago = _now_ts - timedelta(hours=24)
+        _waiver_count = db.query(_FEC).filter(
+            _FEC.user_id == current_user.user_id,
+            _FEC.claimed_at >= _24h_ago
+        ).count()
+    cooldown_minutes = 0 if (_is_trusted and _waiver_count < 2) else 60
+
     # Check wallet balance
     if current_user.wallet_balance < ESCROW_AMOUNT:
         raise HTTPException(
@@ -182,7 +203,7 @@ def create_reservation(
                 "p_port_id": target_port_id,
                 "p_vehicle_id": request.vehicle_id,
                 "p_grace_period_minutes": SLA_TIMEOUT_MINUTES,
-                "p_cooldown_minutes": 60, # Standard cooldown
+                "p_cooldown_minutes": cooldown_minutes,
                 "p_ip_address": str(ip_address)
             }
         )
@@ -322,13 +343,14 @@ def cancel_reservation(
 
         # --- DD-24: Determine if escrow should be refunded or forfeited ---
 
-        # Check if user is a Trusted Account (>100 completed sessions)
+        # Check if user is a Trusted Account (FR-9: ≥3 completed sessions AND account ≥7 days old)
         from app.models.session import ChargingSession
         successful_sessions = db.query(ChargingSession).join(Reservation).filter(
             Reservation.user_id == current_user.user_id,
             ChargingSession.end_time.isnot(None)
         ).count()
-        is_trusted_account = successful_sessions > 100
+        account_age_days = (now - current_user.created_at).days
+        is_trusted_account = successful_sessions >= 3 and account_age_days >= 7
 
         cancel_window_minutes = 10 if is_trusted_account else FREE_CANCEL_HOLD_MINUTES
         hold_duration_minutes = (now - reservation.created_at).total_seconds() / 60

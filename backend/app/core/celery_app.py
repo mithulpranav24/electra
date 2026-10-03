@@ -47,6 +47,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.maintenance_tasks.check_scheduled_maintenance",
         "schedule": 60.0,
     },
+    # FR-15 "Hardware Handshake Timeout": aborts sessions whose 60-second charger
+    # ack window has expired without confirmation; runs every 30 seconds.
+    "abort-timed-out-handshakes": {
+        "task": "app.workers.session_tasks.abort_timed_out_handshakes",
+        "schedule": 30.0,
+    },
 }
 
 # celery_app.autodiscover_tasks() only imports a module literally named

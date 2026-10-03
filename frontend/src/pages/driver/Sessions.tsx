@@ -82,7 +82,13 @@ export function Sessions() {
     return () => clearInterval(interval);
   }, [activeSessionId]);
 
-  const handleStartSession = async (initialPercentage: number, targetPercentage: number) => {
+  const handleStartSession = async (
+    initialPercentage: number,
+    targetPercentage: number,
+    qrCode: string,
+    latitude: number,
+    longitude: number,
+  ) => {
     if (!startingReservation) return;
     setIsStartingSession(true);
     try {
@@ -90,13 +96,26 @@ export function Sessions() {
         reservation_id: startingReservation.reservation_id,
         initial_battery_percentage: initialPercentage,
         target_battery_percentage: targetPercentage,
+        qr_code: qrCode,
+        latitude,
+        longitude,
       });
       setActiveSession(session);
       setStartingReservation(null);
       await loadReservations();
-      pushToast({ title: 'Charging started', message: 'Progress updates automatically as energy is delivered.', tone: 'success' });
+      pushToast({ title: 'Charging started', message: 'Waiting for charger handshake...', tone: 'success' });
+      // FR-15: simulate hardware handshake ack after a 2-second delay
+      if (session?.session_id) {
+        setTimeout(async () => {
+          try {
+            await sessionService.hardwareAck(session.session_id);
+          } catch {
+            /* worker will handle timeout */
+          }
+        }, 2000);
+      }
     } catch (startError) {
-      pushToast({ title: 'Couldn’t start charging', message: getErrorMessage(startError, 'Check your wallet balance and try again.'), tone: 'error' });
+      pushToast({ title: 'Couldn\'t start charging', message: getErrorMessage(startError, 'Check your wallet balance and try again.'), tone: 'error' });
     } finally {
       setIsStartingSession(false);
     }
@@ -246,6 +265,30 @@ export function Sessions() {
                 <span className={`flex size-10 shrink-0 items-center justify-center rounded-full ${invoice.is_paid ? 'bg-[var(--teal-soft)] text-[var(--teal-dark)]' : 'bg-[var(--red-soft)] text-[var(--red)]'}`}><ReceiptText size={18} /></span>
                 <div className="min-w-0 flex-1"><p className="truncate font-bold">{formatDateTime(invoice.created_at)}</p><p className="font-data text-xs text-[var(--steel)]" title={invoice.invoice_id}>{shortId(invoice.invoice_id, 12)}</p></div>
                 <div className="text-right"><p className="font-data font-bold">{formatCurrency(invoice.total_amount)}</p><Badge tone={invoice.is_paid ? 'success' : 'danger'}>{invoice.is_paid ? 'Paid' : 'Unpaid'}</Badge></div>
+                <a
+                  href={`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1'}/invoices/${invoice.invoice_id}/pdf`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-2 flex items-center gap-1 rounded-md border border-[var(--line)] bg-[var(--paper)] px-2.5 py-1.5 text-xs font-semibold text-[var(--ink)] hover:bg-[var(--surface-muted)] transition-colors"
+                  title="Download PDF"
+                  onClick={(e) => {
+                    const token = localStorage.getItem('token');
+                    if (token) {
+                      e.preventDefault();
+                      const url = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1'}/invoices/${invoice.invoice_id}/pdf`;
+                      fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+                        .then(r => r.blob())
+                        .then(blob => {
+                          const a = document.createElement('a');
+                          a.href = URL.createObjectURL(blob);
+                          a.download = `electra-invoice-${invoice.invoice_id.slice(0, 8).toUpperCase()}.pdf`;
+                          a.click();
+                        });
+                    }
+                  }}
+                >
+                  ↓ PDF
+                </a>
               </div>
             ))}
           </div>
@@ -265,7 +308,7 @@ export function Sessions() {
       <StartSessionModal
         open={Boolean(startingReservation)}
         onClose={() => setStartingReservation(null)}
-        onConfirm={(initialPercentage, targetPercentage) => void handleStartSession(initialPercentage, targetPercentage)}
+        onConfirm={(initialPercentage, targetPercentage, qrCode, latitude, longitude) => void handleStartSession(initialPercentage, targetPercentage, qrCode, latitude, longitude)}
         isLoading={isStartingSession}
       />
     </div>

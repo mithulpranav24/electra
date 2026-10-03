@@ -103,6 +103,8 @@ CREATE TABLE CHARGING_PORTS (
     is_pending_maintenance BOOLEAN NOT NULL DEFAULT FALSE,
     has_health_warning BOOLEAN NOT NULL DEFAULT FALSE,
     has_blocked_warning BOOLEAN NOT NULL DEFAULT FALSE,
+    consecutive_handshake_failures INTEGER NOT NULL DEFAULT 0,
+    qr_token UUID NOT NULL DEFAULT uuid_generate_v4() UNIQUE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     status_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -156,6 +158,9 @@ CREATE TABLE CHARGING_SESSIONS (
     target_battery_percentage DECIMAL(5, 2) NOT NULL CHECK (target_battery_percentage > initial_battery_percentage AND target_battery_percentage <= 100),
     applied_tariff DECIMAL(10, 2) NOT NULL CHECK (applied_tariff >= 0),
     is_overstay_penalized BOOLEAN NOT NULL DEFAULT FALSE,
+    hardware_acked BOOLEAN NOT NULL DEFAULT FALSE,
+    hardware_ack_deadline TIMESTAMP,
+    hardware_state VARCHAR(20) NOT NULL DEFAULT 'Disconnected',
     start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     idle_start_time TIMESTAMP,
     end_time TIMESTAMP,
