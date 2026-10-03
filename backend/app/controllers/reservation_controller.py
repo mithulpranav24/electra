@@ -138,7 +138,7 @@ def create_reservation(
         Reservation.user_id == current_user.user_id,
         _CS.end_time.isnot(None)
     ).count()
-    _age_days = (_now_ts - current_user.created_at).days
+    _age_days = (_now_ts - current_user.created_at).days if current_user.created_at else 0
     _is_trusted = _successful >= 3 and _age_days >= 7
     _waiver_count = 0
     if _is_trusted:
@@ -349,7 +349,7 @@ def cancel_reservation(
             Reservation.user_id == current_user.user_id,
             ChargingSession.end_time.isnot(None)
         ).count()
-        account_age_days = (now - current_user.created_at).days
+        account_age_days = (now - current_user.created_at).days if current_user.created_at else 0
         is_trusted_account = successful_sessions >= 3 and account_age_days >= 7
 
         cancel_window_minutes = 10 if is_trusted_account else FREE_CANCEL_HOLD_MINUTES
