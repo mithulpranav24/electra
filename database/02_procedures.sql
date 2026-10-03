@@ -55,15 +55,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_audit_logs_immutability
+CREATE OR REPLACE TRIGGER trg_audit_logs_immutability
 BEFORE UPDATE OR DELETE ON AUDIT_LOGS
 FOR EACH ROW EXECUTE FUNCTION trg_enforce_immutability();
 
-CREATE TRIGGER trg_charging_sessions_immutability
+CREATE OR REPLACE TRIGGER trg_charging_sessions_immutability
 BEFORE UPDATE OR DELETE ON CHARGING_SESSIONS
 FOR EACH ROW EXECUTE FUNCTION trg_enforce_immutability();
 
-CREATE TRIGGER trg_invoices_immutability
+CREATE OR REPLACE TRIGGER trg_invoices_immutability
 BEFORE UPDATE OR DELETE ON INVOICES
 FOR EACH ROW EXECUTE FUNCTION trg_enforce_immutability();
 
@@ -133,11 +133,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_users_soft_delete BEFORE UPDATE ON USERS FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
-CREATE TRIGGER trg_vehicles_soft_delete BEFORE UPDATE ON VEHICLES FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
-CREATE TRIGGER trg_companies_soft_delete BEFORE UPDATE ON COMPANIES FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
-CREATE TRIGGER trg_stations_soft_delete BEFORE UPDATE ON STATIONS FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
-CREATE TRIGGER trg_ports_soft_delete BEFORE UPDATE ON CHARGING_PORTS FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
+CREATE OR REPLACE TRIGGER trg_users_soft_delete BEFORE UPDATE ON USERS FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
+CREATE OR REPLACE TRIGGER trg_vehicles_soft_delete BEFORE UPDATE ON VEHICLES FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
+CREATE OR REPLACE TRIGGER trg_companies_soft_delete BEFORE UPDATE ON COMPANIES FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
+CREATE OR REPLACE TRIGGER trg_stations_soft_delete BEFORE UPDATE ON STATIONS FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
+CREATE OR REPLACE TRIGGER trg_ports_soft_delete BEFORE UPDATE ON CHARGING_PORTS FOR EACH ROW EXECUTE FUNCTION trg_prevent_invalid_soft_delete();
 
 -- ==========================================
 -- 1.5 WALLET BALANCE MAINTENANCE (ACID compliance for wallet_balance,
@@ -181,7 +181,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_update_wallet_balance
+CREATE OR REPLACE TRIGGER trg_update_wallet_balance
 AFTER INSERT OR UPDATE OR DELETE ON WALLET_TRANSACTIONS
 FOR EACH ROW EXECUTE FUNCTION update_wallet_balance_from_transactions();
 
