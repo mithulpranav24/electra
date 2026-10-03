@@ -273,10 +273,11 @@ export const reservationService = {
     const { data } = await api.post<Reservation>('/reservations', payload);
     return data;
   },
-  cancel: async (reservationId: string): Promise<{ message?: string }> => {
-    const { data } = await api.post<{ message?: string }>(`/reservations/${reservationId}/cancel`);
+  cancel: async (reservationId: string, reason?: string): Promise<{ message?: string }> => {
+    const { data } = await api.post<{ message?: string }>(`/reservations/${reservationId}/cancel`, reason ? { reason } : {});
     return data;
   },
+
 };
 
 export const waitlistService = {
