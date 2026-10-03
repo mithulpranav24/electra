@@ -30,3 +30,7 @@ If you are developing a production application, we recommend enabling type-aware
 ```
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+
+## Geolocation Configuration
+
+By default, the frontend uses mock Bengaluru coordinates so check-in and port challenge geofencing (200m) work seamlessly in dev environments outside Bengaluru. Set `VITE_USE_MOCK_GPS=false` in your `.env` to enable real browser GPS.

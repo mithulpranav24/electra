@@ -369,7 +369,8 @@ def cancel_reservation(
         hold_duration_minutes = (now - reservation.created_at).total_seconds() / 60
         twenty_four_hours_ago = now - timedelta(hours=24)
 
-        reason_str = cancel_req.reason.strip() if (cancel_req and cancel_req.reason) else None
+        raw_reason = cancel_req.reason.strip() if (cancel_req and cancel_req.reason) else None
+        reason_str = raw_reason if raw_reason and raw_reason not in ["User cancelled", "Standard"] else None
         is_fault_or_blocked = reason_str in ["Faulty Charger", "Blocked Bay"] if reason_str else False
 
         # TASK-6: Cooldown Waiver for Trusted Drivers
@@ -408,7 +409,7 @@ def cancel_reservation(
 
         # Apply refund or penalty
         if waiver_applied:
-            cancel_reason = f"User cancelled ({reason_str}) (Waiver)"
+            cancel_reason = f"User cancelled ({reason_str}) (Waiver)" if reason_str else "User cancelled (Waiver)"
             wallet_tx = WalletTransaction(
                 user_id=current_user.user_id,
                 amount=ESCROW_AMOUNT,
