@@ -189,7 +189,7 @@ export function Sessions() {
     if (!cancelling) return;
     setIsCancelling(true);
     try {
-      const reasonToSend = (cancelReason === 'Faulty Charger' || cancelReason === 'Blocked Bay') ? cancelReason : 'User cancelled';
+      const reasonToSend = cancelReason === 'Standard' ? undefined : cancelReason;
       const res = await reservationService.cancel(cancelling.reservation_id, reasonToSend);
       setCancelling(null);
       setCancelReason('Standard');

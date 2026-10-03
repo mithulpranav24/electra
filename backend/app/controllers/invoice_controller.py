@@ -133,19 +133,19 @@ def download_invoice_pdf(
     idle_fee = float(snapshot["idle_fee"]) if snapshot else 0.0
     total = float(invoice.total_amount)
     min_fee = float(station.minimum_session_fee) if station else 0.0
-    penalties = max(0.0, round(total - (energy_cost + idle_fee), 2))
-
-
-
+    session_cost = float(snapshot["total_cost"]) if snapshot else 0.0
+    min_fee_adj = max(0.0, round(session_cost - (energy_cost + idle_fee), 2))
+    penalties = max(0.0, round(total - session_cost, 2))
 
     cost_data = [
         ["Item", "Detail", "Amount (Rs.)"],
-        ["Energy / Session fee", f"{energy_kwh:.3f} kWh @ Rs.{tariff:.2f}/kWh", f"{energy_cost:.2f}"],
+        ["Energy fee", f"{energy_kwh:.3f} kWh @ Rs.{tariff:.2f}/kWh", f"{energy_cost:.2f}"],
         ["Idle / overstay fee", f"{idle_minutes:.1f} billable min", f"{idle_fee:.2f}"],
-        ["Penalties / Additional fees", "Overstay / other penalty" if penalties > 0 else "None", f"{penalties:.2f}"],
-        ["Total charged", "", f"{total:.2f}"],
     ]
-
+    if min_fee_adj > 0:
+        cost_data.append(["Minimum fee adjustment", "Station minimum session fee floor", f"{min_fee_adj:.2f}"])
+    cost_data.append(["Penalties / Additional fees", "Station / operator penalty" if penalties > 0 else "None", f"{penalties:.2f}"])
+    cost_data.append(["Total charged", "", f"{total:.2f}"])
 
     tbl2 = Table(cost_data, colWidths=[5*cm, 8*cm, 3*cm])
     tbl2.setStyle(TableStyle([
