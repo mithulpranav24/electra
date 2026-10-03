@@ -1,4 +1,4 @@
-﻿name: Test Suite
+name: Test Suite
 
 on:
   push:
@@ -38,8 +38,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
