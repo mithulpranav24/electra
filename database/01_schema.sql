@@ -298,39 +298,6 @@ CREATE TABLE RECENT_STATIONS (
     viewed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-
--- Trigger to maintain USERS.wallet_balance exactly equal to sum of WALLET_TRANSACTIONS
-CREATE OR REPLACE FUNCTION update_wallet_balance_from_transactions()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        UPDATE USERS
-        SET wallet_balance = (
-            SELECT COALESCE(SUM(amount), 0)
-            FROM WALLET_TRANSACTIONS
-            WHERE user_id = OLD.user_id
-        )
-        WHERE user_id = OLD.user_id;
-        RETURN OLD;
-    ELSIF TG_OP = 'UPDATE' THEN
-        UPDATE USERS SET wallet_balance = (SELECT COALESCE(SUM(amount), 0) FROM WALLET_TRANSACTIONS WHERE user_id = OLD.user_id) WHERE user_id = OLD.user_id;
-        IF NEW.user_id != OLD.user_id THEN
-            UPDATE USERS SET wallet_balance = (SELECT COALESCE(SUM(amount), 0) FROM WALLET_TRANSACTIONS WHERE user_id = NEW.user_id) WHERE user_id = NEW.user_id;
-        END IF;
-        RETURN NEW;
-    ELSE -- INSERT
-        UPDATE USERS
-        SET wallet_balance = (
-            SELECT COALESCE(SUM(amount), 0)
-            FROM WALLET_TRANSACTIONS
-            WHERE user_id = NEW.user_id
-        )
-        WHERE user_id = NEW.user_id;
-        RETURN NEW;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_update_wallet_balance
-AFTER INSERT OR UPDATE OR DELETE ON WALLET_TRANSACTIONS
-FOR EACH ROW EXECUTE FUNCTION update_wallet_balance_from_transactions();
+-- USERS.wallet_balance is maintained by trg_update_wallet_balance, defined in
+-- 02_procedures.sql (section 1.5). Do not redefine it here: a second CREATE TRIGGER
+-- aborts 02_procedures.sql under ON_ERROR_STOP (as docker-entrypoint-initdb runs it).

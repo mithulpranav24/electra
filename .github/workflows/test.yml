@@ -59,10 +59,10 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -p 5433 -U postgres -d electra_test -f database/01_schema.sql
-          psql -h localhost -p 5433 -U postgres -d electra_test -f database/02_procedures.sql
-          psql -h localhost -p 5433 -U postgres -d electra_test -f database/03_seed_data.sql
-          psql -h localhost -p 5433 -U postgres -d electra_test -f database/04_phase10_migration.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -p 5433 -U postgres -d electra_test -f database/01_schema.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -p 5433 -U postgres -d electra_test -f database/02_procedures.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -p 5433 -U postgres -d electra_test -f database/03_seed_data.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -p 5433 -U postgres -d electra_test -f database/04_phase10_migration.sql
 
       - name: Run tests
         working-directory: backend
