@@ -16,3 +16,4 @@ pyjwt
 Shapely
 pytest
 httpx
+reportlab

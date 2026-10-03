@@ -35,6 +35,7 @@ export interface ChargingPort {
   port_id: string;
   station_id: string;
   qr_code: string;
+  qr_token?: string;
   connector_type: string;
   charger_type: string;
   status: string;

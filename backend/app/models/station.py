@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, Numeric, DateTime, Time, ForeignKey, func
+from sqlalchemy import Column, String, Boolean, Integer, Numeric, DateTime, Time, ForeignKey, func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from geoalchemy2 import Geography
@@ -43,12 +43,14 @@ class ChargingPort(Base):
     port_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     station_id = Column(UUID(as_uuid=True), ForeignKey("stations.station_id", ondelete="RESTRICT"), nullable=False)
     qr_code = Column(String(100), unique=True, nullable=False)
+    qr_token = Column(UUID(as_uuid=True), unique=True, nullable=False, default=uuid.uuid4)
     connector_type = Column(String(50), nullable=False)
     charger_type = Column(String(50), nullable=False)
     status = Column(String, nullable=False, default="Available")
     is_pending_maintenance = Column(Boolean, nullable=False, default=False)
     has_health_warning = Column(Boolean, nullable=False, default=False)
     has_blocked_warning = Column(Boolean, nullable=False, default=False)
+    consecutive_handshake_failures = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
     status_updated_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
     created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
