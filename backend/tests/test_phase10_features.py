@@ -350,6 +350,7 @@ def test_real_db_challenge_connected_then_disconnected():
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance)
             VALUES (:uid, :email, 'hash', 'Ghost Driver', '9999999991', 'Driver', 5000.00)
         """), {"uid": ghost_user_id, "email": f"ghost_{ghost_user_id}@test.com"})
+        db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, 5000.00, 'Top-up')"), {"uid": ghost_user_id})
 
         db.execute(text("""
             INSERT INTO VEHICLES (vehicle_id, user_id, make, model, registration_number, battery_capacity, connector_type, is_active, is_default)
@@ -360,6 +361,7 @@ def test_real_db_challenge_connected_then_disconnected():
             INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, expires_at)
             VALUES (:rid, :uid, :pid, :vid, 'Active', CURRENT_TIMESTAMP + INTERVAL '1 hour')
         """), {"rid": ghost_res_id, "uid": ghost_user_id, "pid": port_id, "vid": ghost_veh_id})
+        db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (:uid, -1000.00, 'Escrow Hold', :rid)"), {"uid": ghost_user_id, "rid": ghost_res_id})
 
         db.execute(text("""
             INSERT INTO CHARGING_SESSIONS (session_id, reservation_id, initial_battery_percentage, target_battery_percentage, applied_tariff, start_time, hardware_acked, hardware_state)
@@ -372,6 +374,7 @@ def test_real_db_challenge_connected_then_disconnected():
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance)
             VALUES (:uid, :email, 'hash', 'Challenger Driver', '9999999992', 'Driver', 5000.00)
         """), {"uid": challenger_id, "email": f"chal_{challenger_id}@test.com"})
+        db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, 5000.00, 'Top-up')"), {"uid": challenger_id})
 
         db.execute(text("""
             INSERT INTO VEHICLES (vehicle_id, user_id, make, model, registration_number, battery_capacity, connector_type, is_active, is_default)
@@ -435,6 +438,7 @@ def test_real_db_handshake_timeout_refunds_all():
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance)
             VALUES (:uid, :email, 'hash', 'Timeout Driver', '9999999993', 'Driver', :bal)
         """), {"uid": user_id, "email": f"timeout_{user_id}@test.com", "bal": initial_balance})
+        db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, :bal, 'Top-up')"), {"uid": user_id, "bal": initial_balance})
 
         company_id = uuid.uuid4()
         area_id = uuid.uuid4()
@@ -461,11 +465,6 @@ def test_real_db_handshake_timeout_refunds_all():
             VALUES (:vid, :uid, 'Tata', 'Nexon EV', :reg, 40.0, 'CCS2', TRUE, TRUE)
         """), {"vid": veh_id, "uid": user_id, "reg": f"TIM-{str(user_id)[:4]}"})
 
-        escrow = Decimal("1000.00")
-        energy_hold = Decimal("100.00")
-        post_start_balance = initial_balance - escrow - energy_hold
-        db.execute(text("UPDATE USERS SET wallet_balance = :bal WHERE user_id = :uid"), {"bal": post_start_balance, "uid": user_id})
-
         db.execute(text("""
             INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, expires_at)
             VALUES (:rid, :uid, :pid, :vid, 'Active', CURRENT_TIMESTAMP + INTERVAL '1 hour')
@@ -475,23 +474,37 @@ def test_real_db_handshake_timeout_refunds_all():
             INSERT INTO CHARGING_SESSIONS (session_id, reservation_id, initial_battery_percentage, target_battery_percentage, applied_tariff, start_time, hardware_acked, hardware_ack_deadline, is_aborted)
             VALUES (:sid, :rid, 20.0, 80.0, 15.0, CURRENT_TIMESTAMP - INTERVAL '2 minutes', FALSE, CURRENT_TIMESTAMP - INTERVAL '10 seconds', FALSE)
         """), {"sid": sess_id, "rid": res_id})
+
+        from app.services.session_service import compute_secondary_hold
+        sess_model = db.query(ChargingSession).filter(ChargingSession.session_id == sess_id).first()
+        veh_model = db.query(Vehicle).filter(Vehicle.vehicle_id == veh_id).first()
+        st_model = db.query(Station).filter(Station.station_id == station_id).first()
+        secondary_hold = compute_secondary_hold(sess_model, veh_model, st_model)
+
+        db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (:uid, -1000.00, 'Escrow Hold', :rid)"), {"uid": user_id, "rid": res_id})
+        db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (:uid, -:hold, 'Session Payment', :rid)"), {"uid": user_id, "rid": res_id, "hold": secondary_hold})
         db.commit()
+    finally:
+        db.close()
 
-        with patch("app.workers.session_tasks.SessionLocal", return_value=db):
-            aborted_count = abort_timed_out_handshakes()
+    with patch("app.workers.session_tasks.SessionLocal", side_effect=TestingSessionLocal):
+        aborted_count = abort_timed_out_handshakes()
 
-        assert aborted_count >= 1
-        sess = db.query(ChargingSession).filter(ChargingSession.session_id == sess_id).first()
+    assert aborted_count >= 1
+
+    db_check = TestingSessionLocal()
+    try:
+        sess = db_check.query(ChargingSession).filter(ChargingSession.session_id == sess_id).first()
         assert sess.is_aborted is True
         assert sess.end_time is not None
 
-        res = db.query(Reservation).filter(Reservation.reservation_id == res_id).first()
+        res = db_check.query(Reservation).filter(Reservation.reservation_id == res_id).first()
         assert res.status == "Expired"
 
-        user = db.query(User).filter(User.user_id == user_id).first()
+        user = db_check.query(User).filter(User.user_id == user_id).first()
         assert user.wallet_balance == initial_balance
     finally:
-        db.close()
+        db_check.close()
 
 
 @pytest.mark.skipif(not DB_AVAILABLE, reason="Requires Postgres DB with SPs and schema")
@@ -507,6 +520,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance, created_at)
             VALUES (:uid, :email, 'hash', 'Trusted Driver', '9999999994', 'Driver', 20000.00, :created_at)
         """), {"uid": user_id, "email": f"trusted_{user_id}@test.com", "created_at": now - timedelta(days=10)})
+        db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, 20000.00, 'Top-up')"), {"uid": user_id})
 
         company_id = uuid.uuid4()
         area_id = uuid.uuid4()
@@ -597,6 +611,7 @@ def test_real_db_dashboard_real_kwh():
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance)
             VALUES (:uid, :email, 'hash', 'Dashboard Driver', '9999999995', 'Driver', 5000.00)
         """), {"uid": user_id, "email": f"dash_{user_id}@test.com"})
+        db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, 5000.00, 'Top-up')"), {"uid": user_id})
 
         company_id = uuid.uuid4()
         area_id = uuid.uuid4()
