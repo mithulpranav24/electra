@@ -316,6 +316,12 @@ def cancel_reservation(
             raise HTTPException(status_code=400, detail="Only confirmed reservations can be cancelled")
 
         # Step 2: Acquire locks in correct order: STATIONS -> CHARGING_PORTS -> VEHICLES -> USERS -> RESERVATIONS
+        # STATIONS is a read-only validation lock here (no station-wide state changes), so it
+        # must be FOR SHARE (Architecture.md 3.5) rather than the exclusive default, or every
+        # other concurrent reservation/waitlist request at this station would be blocked.
+        # of=Station scopes the FOR SHARE to just the joined Station row - without it, the join
+        # also puts ChargingPort under FOR SHARE, which the very next query below upgrades to
+        # FOR UPDATE (a SHARE -> UPDATE lock upgrade is a known deadlock vector under contention).
         station = db.query(Station).join(ChargingPort).with_for_update(read=True, of=Station).filter(
             ChargingPort.port_id == reservation_read.port_id
         ).first()
@@ -332,7 +338,8 @@ def cancel_reservation(
             User.user_id == current_user.user_id
         ).first()
 
-        # Tier 3.5: WAITLIST
+        # Tier 3.5: WAITLIST — lock the promotion candidate (if any) before the
+        # Tier 4 RESERVATIONS lock below, to respect the global lock hierarchy.
         waitlist_candidate = None
         if port:
             waitlist_candidate = WaitlistService.find_candidate_waitlist_entry(db, port.station_id, port.connector_type, port.port_id)
@@ -341,6 +348,7 @@ def cancel_reservation(
             Reservation.reservation_id == reservation_id,
             Reservation.user_id == current_user.user_id
         ).first()
+
 
         # Re-check status after acquiring lock (guard against race conditions)
         if reservation.status != "Confirmed":

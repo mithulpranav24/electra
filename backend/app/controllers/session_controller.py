@@ -107,12 +107,25 @@ def mock_disconnect(
     current_user: User = Depends(get_current_user),
 ):
     """Mocks physical vehicle disconnect (State A) on an active session to test ghost session resolution."""
+    from app.models.reservation import Reservation
+
     session = db.query(ChargingSession).filter(ChargingSession.session_id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    reservation = db.query(Reservation).filter(
+        Reservation.reservation_id == session.reservation_id
+    ).first()
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    if current_user.role not in ["Admin", "Operator"] and reservation.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You cannot modify another driver's session")
+
     session.hardware_state = "Disconnected"
     db.commit()
     return {"success": True, "message": "Hardware state set to Disconnected (State A)"}
+
 
 
 @router.post("/challenge/{port_id}", response_model=ChallengePortResponse)

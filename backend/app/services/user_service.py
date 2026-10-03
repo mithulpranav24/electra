@@ -79,6 +79,7 @@ class UserService:
     def get_dashboard_data(db: Session, user_id: UUID) -> dict:
         from app.models.session import ChargingSession
         from app.models.station import ChargingPort, Station
+        from app.services.session_service import compute_snapshot
 
         user = UserService.get_user_by_id(db, user_id)
         
@@ -87,6 +88,7 @@ class UserService:
         unpaid_invoices = db.query(Invoice).filter(Invoice.user_id == user_id, Invoice.is_paid == False).count()
 
         # Real total energy delivered across all completed, non-aborted sessions for this user
+
         completed_sessions = (
             db.query(ChargingSession, Vehicle, ChargingPort, Station)
             .join(Reservation, ChargingSession.reservation_id == Reservation.reservation_id)

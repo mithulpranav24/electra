@@ -7,7 +7,8 @@ import { favoriteService, ratingService, reservationService, searchService, sess
 import type { ChargingPort, Reservation, Station, StationRatingsResponse, Vehicle, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency, formatDate, normalizeConnector, vehicleId } from '../../lib/format';
-import { getUserLocation } from '../../lib/geo';
+import { getUserLocation, MOCK_USER_LAT, MOCK_USER_LNG } from '../../lib/geo';
+
 import { ReservationModal } from '../../components/ReservationModal';
 import { WaitlistJoinModal } from '../../components/WaitlistJoinModal';
 import { WaitlistStatusCard } from '../../components/WaitlistStatusCard';
@@ -142,8 +143,7 @@ export function StationDetails() {
     if (!waitlistVehicleId || !id) return;
     setIsJoiningWaitlist(true);
     try {
-      const loc = await getUserLocation();
-      const status = await waitlistService.join({ station_id: id, vehicle_id: waitlistVehicleId, lat: loc.lat, lng: loc.lng });
+      const status = await waitlistService.join({ station_id: id, vehicle_id: waitlistVehicleId, lat: MOCK_USER_LAT, lng: MOCK_USER_LNG });
       setData((current) => current ? { ...current, waitlistStatus: status } : current);
       setShowWaitlistModal(false);
       pushToast({ title: 'Joined the waitlist', message: `You're position ${status.position} in line.`, tone: 'success' });

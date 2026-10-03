@@ -8,6 +8,15 @@ ADD COLUMN IF NOT EXISTS consecutive_handshake_failures INTEGER NOT NULL DEFAULT
 ALTER TABLE CHARGING_PORTS 
 ADD COLUMN IF NOT EXISTS qr_token UUID NOT NULL DEFAULT uuid_generate_v4();
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'charging_ports_qr_token_key'
+    ) THEN
+        ALTER TABLE CHARGING_PORTS ADD CONSTRAINT charging_ports_qr_token_key UNIQUE (qr_token);
+    END IF;
+END $$;
+
 -- Add hardware tracking and status columns to CHARGING_SESSIONS
 ALTER TABLE CHARGING_SESSIONS 
 ADD COLUMN IF NOT EXISTS hardware_acked BOOLEAN NOT NULL DEFAULT FALSE;
@@ -21,6 +30,11 @@ ADD COLUMN IF NOT EXISTS hardware_state VARCHAR(20) NOT NULL DEFAULT 'Disconnect
 ALTER TABLE CHARGING_SESSIONS 
 ADD COLUMN IF NOT EXISTS is_aborted BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Backfill existing charging sessions (which had no handshake deadline) as acked and connected
+UPDATE charging_sessions 
+SET hardware_acked = TRUE, hardware_state = 'Connected' 
+WHERE hardware_ack_deadline IS NULL;
+
 -- Create COOLDOWN_WAIVERS table if it doesn't already exist
 CREATE TABLE IF NOT EXISTS COOLDOWN_WAIVERS (
     waiver_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -32,3 +46,4 @@ CREATE TABLE IF NOT EXISTS COOLDOWN_WAIVERS (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cooldown_waivers_user ON COOLDOWN_WAIVERS(user_id, created_at);
+

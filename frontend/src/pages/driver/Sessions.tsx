@@ -11,7 +11,9 @@ import { WaitlistStatusCard } from '../../components/WaitlistStatusCard';
 import { Badge } from '../../ui/Badge';
 import { statusTone } from '../../lib/status';
 import { Button } from '../../ui/Button';
-import { ConfirmDialog } from '../../ui/ConfirmDialog';
+import { Dialog } from '../../ui/Dialog';
+import { Field } from '../../ui/Field';
+
 import { EmptyState, ErrorState, LoadingState } from '../../ui/Feedback';
 import { PageHeader, SectionHeader } from '../../ui/Page';
 import { useToast } from '../../ui/ToastContext';
@@ -31,7 +33,9 @@ export function Sessions() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [cancelling, setCancelling] = useState<Reservation | null>(null);
+  const [cancelReason, setCancelReason] = useState('Standard');
   const [isCancelling, setIsCancelling] = useState(false);
+
   const [isLeavingWaitlist, setIsLeavingWaitlist] = useState(false);
   const [isConfirmingOffer, setIsConfirmingOffer] = useState(false);
   const [startingReservation, setStartingReservation] = useState<Reservation | null>(null);
@@ -185,16 +189,19 @@ export function Sessions() {
     if (!cancelling) return;
     setIsCancelling(true);
     try {
-      await reservationService.cancel(cancelling.reservation_id);
+      const reasonToSend = (cancelReason === 'Faulty Charger' || cancelReason === 'Blocked Bay') ? cancelReason : 'User cancelled';
+      const res = await reservationService.cancel(cancelling.reservation_id, reasonToSend);
       setCancelling(null);
+      setCancelReason('Standard');
       await loadReservations();
-      pushToast({ title: 'Reservation cancelled', message: 'Your wallet activity shows whether the escrow was refunded or forfeited.', tone: 'success' });
+      pushToast({ title: 'Reservation cancelled', message: res.message || 'Your wallet activity shows whether the escrow was refunded or forfeited.', tone: 'success' });
     } catch (cancelError) {
       pushToast({ title: 'Couldn’t cancel the reservation', message: getErrorMessage(cancelError, 'The reservation state may have changed.'), tone: 'error' });
     } finally {
       setIsCancelling(false);
     }
   };
+
 
   return (
     <div className="flex flex-col gap-7 enter-up">
@@ -306,15 +313,46 @@ export function Sessions() {
         )}
       </section>
 
-      <ConfirmDialog
+      <Dialog
         open={Boolean(cancelling)}
         onClose={() => setCancelling(null)}
-        onConfirm={() => void handleCancel()}
         title="Cancel this reservation?"
-        description="The backend decides whether the ₹1,000 escrow is refunded based on how long the port was held and your recent cancellation history. If the free-cancellation conditions are not met, the escrow is forfeited."
-        confirmLabel="Cancel reservation"
-        isLoading={isCancelling}
-      />
+        description="The backend decides whether the ₹1,000 escrow is refunded based on how long the port was held and your recent cancellation history. Trusted accounts cancelling for a Faulty Charger or Blocked Bay within 5 minutes receive an automatic cooldown waiver."
+        size="sm"
+        preventClose={isCancelling}
+        footer={
+          <>
+            <Button onClick={() => setCancelling(null)} disabled={isCancelling}>Keep reservation</Button>
+            <Button variant="danger" onClick={() => void handleCancel()} isLoading={isCancelling}>Cancel reservation</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Field label="Cancellation Reason" hint="Select a reason for cancelling this reservation.">
+            {({ id: inputId, describedBy }) => (
+              <select
+                id={inputId}
+                aria-describedby={describedBy}
+                className="field-control"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                disabled={isCancelling}
+              >
+                <option value="Standard">Standard / Change of plans</option>
+                <option value="Faulty Charger">Faulty Charger (Hardware defect / not working)</option>
+                <option value="Blocked Bay">Blocked Bay (ICE'd or obstructed)</option>
+                <option value="Other">Other reason</option>
+              </select>
+            )}
+          </Field>
+          {(cancelReason === 'Faulty Charger' || cancelReason === 'Blocked Bay') && (
+            <div className="rounded-lg bg-[var(--amber-soft)] p-3 text-xs font-medium text-[#6f500c]">
+              Trusted accounts with cancellations under 5 minutes will receive an immediate escrow refund and a station cooldown waiver (up to 2/day).
+            </div>
+          )}
+        </div>
+      </Dialog>
+
 
       <StartSessionModal
         open={Boolean(startingReservation)}
