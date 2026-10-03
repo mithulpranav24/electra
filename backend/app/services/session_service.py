@@ -131,10 +131,6 @@ def compute_snapshot(session: ChargingSession, vehicle: Vehicle, port: ChargingP
     progress, energy delivered, and cost so far. `at_time` lets callers cap
     the calculation at an exact moment (e.g. the 24-hour auto-termination
     boundary) rather than always using "now"."""
-    elapsed_minutes = Decimal((at_time - session.start_time).total_seconds()) / Decimal("60")
-    if elapsed_minutes < 0:
-        elapsed_minutes = Decimal("0")
-
     power_kw = port_power_kw(port.charger_type)
     battery_capacity = Decimal(str(vehicle.battery_capacity))
     initial_pct = Decimal(str(session.initial_battery_percentage))
@@ -142,6 +138,25 @@ def compute_snapshot(session: ChargingSession, vehicle: Vehicle, port: ChargingP
     tariff = Decimal(str(session.applied_tariff))
 
     minutes_to_target = minutes_to_reach_target(initial_pct, target_pct, battery_capacity, power_kw)
+
+    # FR-15: Billing and energy delivery do NOT start until hardware handshake is acked
+    if not session.hardware_acked:
+        return {
+            "current_battery_percentage": initial_pct,
+            "target_reached": False,
+            "energy_delivered_kwh": Decimal("0.00"),
+            "energy_cost": Decimal("0.00"),
+            "idle_minutes": Decimal("0.0"),
+            "idle_fee": Decimal("0.00"),
+            "total_cost": Decimal("0.00"),
+            "elapsed_minutes": Decimal("0.0"),
+            "eta_minutes_remaining": minutes_to_target,
+        }
+
+    elapsed_minutes = Decimal((at_time - session.start_time).total_seconds()) / Decimal("60")
+    if elapsed_minutes < 0:
+        elapsed_minutes = Decimal("0")
+
     current_pct = current_battery_percentage(initial_pct, target_pct, battery_capacity, power_kw, elapsed_minutes)
     minutes_since_target = max(Decimal("0"), elapsed_minutes - minutes_to_target)
     idle_minutes = billable_idle_minutes(minutes_since_target)
@@ -261,6 +276,7 @@ class SessionService:
         # FR-15: Set hardware handshake deadline — billing doesn't begin until ack arrives
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         session.hardware_acked = False
+        session.hardware_state = "Connected"
         session.hardware_ack_deadline = now + timedelta(seconds=60)
         db.commit()
 
@@ -803,6 +819,7 @@ class SessionService:
 
             if challenger_veh and challenger_user.wallet_balance >= ESCROW_AMOUNT:
                 try:
+                    savepoint = db.begin_nested()
                     db.execute(
                         text("""
                             CALL sp_CreateReservation(
@@ -823,6 +840,7 @@ class SessionService:
                             "p_ip_address": str(ip_address),
                         },
                     )
+                    savepoint.commit()
                     new_res = (
                         db.query(Reservation)
                         .filter(Reservation.user_id == challenger.user_id, Reservation.port_id == port.port_id, Reservation.status == "Confirmed")
@@ -833,6 +851,7 @@ class SessionService:
                         created_res_id = new_res.reservation_id
                     msg = "Ghost session terminated. You have been granted a 15-minute reservation on this port."
                 except Exception:
+                    savepoint.rollback()
                     port_locked.status = "Available"
                     msg = "Ghost session terminated. The port is now Available."
             else:

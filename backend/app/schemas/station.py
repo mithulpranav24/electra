@@ -26,6 +26,7 @@ class ChargingPortUpdate(BaseModel):
 class ChargingPortResponse(ChargingPortBase):
     port_id: UUID
     station_id: UUID
+    qr_token: Optional[UUID] = None
     is_pending_maintenance: bool
     has_health_warning: bool
     has_blocked_warning: bool

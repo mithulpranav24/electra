@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Clock3, Heart, ListPlus, MapPin, MessageSquare, PlugZap, QrCode, ShieldAlert, Star, WalletCards, Zap } from 'lucide-react';
@@ -6,7 +7,7 @@ import { favoriteService, ratingService, reservationService, searchService, sess
 import type { ChargingPort, Reservation, Station, StationRatingsResponse, Vehicle, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency, formatDate, normalizeConnector, vehicleId } from '../../lib/format';
-import { MOCK_USER_LAT, MOCK_USER_LNG } from '../../lib/geo';
+import { getUserLocation } from '../../lib/geo';
 import { ReservationModal } from '../../components/ReservationModal';
 import { WaitlistJoinModal } from '../../components/WaitlistJoinModal';
 import { WaitlistStatusCard } from '../../components/WaitlistStatusCard';
@@ -141,7 +142,8 @@ export function StationDetails() {
     if (!waitlistVehicleId || !id) return;
     setIsJoiningWaitlist(true);
     try {
-      const status = await waitlistService.join({ station_id: id, vehicle_id: waitlistVehicleId, lat: MOCK_USER_LAT, lng: MOCK_USER_LNG });
+      const loc = await getUserLocation();
+      const status = await waitlistService.join({ station_id: id, vehicle_id: waitlistVehicleId, lat: loc.lat, lng: loc.lng });
       setData((current) => current ? { ...current, waitlistStatus: status } : current);
       setShowWaitlistModal(false);
       pushToast({ title: 'Joined the waitlist', message: `You're position ${status.position} in line.`, tone: 'success' });
@@ -238,10 +240,11 @@ export function StationDetails() {
     if (!challengingPort || !challengeQr.trim()) return;
     setIsChallenging(true);
     try {
+      const loc = await getUserLocation();
       const res = await sessionService.challengePort(challengingPort.port_id, {
         qr_code: challengeQr.trim(),
-        latitude: MOCK_USER_LAT,
-        longitude: MOCK_USER_LNG,
+        latitude: loc.lat,
+        longitude: loc.lng,
       });
       setChallengingPort(null);
       pushToast({

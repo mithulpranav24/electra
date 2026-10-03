@@ -4,7 +4,7 @@ import { Alert } from '../ui/Feedback';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Field } from '../ui/Field';
-import { MOCK_USER_LAT, MOCK_USER_LNG } from '../lib/geo';
+import { getUserLocation } from '../lib/geo';
 
 interface StartSessionModalProps {
   open: boolean;
@@ -18,6 +18,7 @@ export function StartSessionModal({ open, onClose, onConfirm, isLoading = false,
   const [initialPercentage, setInitialPercentage] = useState(20);
   const [targetPercentage, setTargetPercentage] = useState(80);
   const [qrCode, setQrCode] = useState('');
+  const [isLocating, setIsLocating] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -26,6 +27,16 @@ export function StartSessionModal({ open, onClose, onConfirm, isLoading = false,
       setQrCode(portQrCode ?? '');
     }
   }, [open, portQrCode]);
+
+  const handleStart = async () => {
+    setIsLocating(true);
+    try {
+      const loc = await getUserLocation();
+      onConfirm(initialPercentage, targetPercentage, qrCode, loc.lat, loc.lng);
+    } finally {
+      setIsLocating(false);
+    }
+  };
 
   const isValid = initialPercentage >= 0 && initialPercentage < 100 && targetPercentage > initialPercentage && targetPercentage <= 100 && qrCode.trim().length > 0;
 
@@ -36,9 +47,10 @@ export function StartSessionModal({ open, onClose, onConfirm, isLoading = false,
       title="Start charging"
       description="Enter your vehicle's current and target battery level, and scan the port's QR code to check in."
       size="sm"
-      preventClose={isLoading}
-      footer={<><Button onClick={onClose} disabled={isLoading}>Not now</Button><Button variant="primary" onClick={() => onConfirm(initialPercentage, targetPercentage, qrCode, MOCK_USER_LAT, MOCK_USER_LNG)} isLoading={isLoading} disabled={!isValid}>Start charging</Button></>}
+      preventClose={isLoading || isLocating}
+      footer={<><Button onClick={onClose} disabled={isLoading || isLocating}>Not now</Button><Button variant="primary" onClick={() => void handleStart()} isLoading={isLoading || isLocating} disabled={!isValid}>Start charging</Button></>}
     >
+
       <div className="flex flex-col gap-5">
         <Field label="Current battery level" hint="What the vehicle's dashboard shows right now.">
           {({ id, describedBy }) => (

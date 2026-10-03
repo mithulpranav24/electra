@@ -9,6 +9,10 @@ class ReservationCreate(BaseModel):
     station_id: Optional[str] = None
     port_id: Optional[str] = None
 
+class CancelReservationRequest(BaseModel):
+    reason: Optional[str] = None
+
+
 class ReservationResponse(BaseModel):
     reservation_id: UUID
     user_id: UUID

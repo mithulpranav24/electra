@@ -92,7 +92,7 @@ def download_invoice_pdf(
     paid_str = invoice.paid_at.strftime("%Y-%m-%d %H:%M UTC") if invoice.paid_at else "Unpaid"
 
     story = []
-    story.append(Paragraph("⚡ Electra Charging Invoice", title_style))
+    story.append(Paragraph("Electra Charging Invoice", title_style))
     story.append(Paragraph(f"Invoice #{inv_num}  ·  {created_str}", sub_style))
     story.append(Spacer(1, 0.4*cm))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
@@ -108,7 +108,7 @@ def download_invoice_pdf(
         ["Vehicle", f"{vehicle.make} {vehicle.model} ({vehicle.registration_number})" if vehicle else "—"],
         ["Session Start", session.start_time.strftime("%Y-%m-%d %H:%M UTC") if session and session.start_time else "—"],
         ["Session End", session.end_time.strftime("%Y-%m-%d %H:%M UTC") if session and session.end_time else "—"],
-        ["Battery: Initial → Target", f"{session.initial_battery_percentage}% → {session.target_battery_percentage}%" if session else "—"],
+        ["Battery: Initial -> Target", f"{session.initial_battery_percentage}% -> {session.target_battery_percentage}%" if session else "—"],
     ]
     tbl = Table(summary_data, colWidths=[5*cm, 11*cm])
     tbl.setStyle(TableStyle([
@@ -135,11 +135,12 @@ def download_invoice_pdf(
     min_fee = float(station.minimum_session_fee) if station else 0.0
 
     cost_data = [
-        ["Item", "Detail", "Amount (₹)"],
-        ["Energy delivered", f"{energy_kwh:.3f} kWh × ₹{tariff:.2f}/kWh", f"{energy_cost:.2f}"],
+        ["Item", "Detail", "Amount (Rs.)"],
+        ["Energy / Session fee", f"{energy_kwh:.3f} kWh @ Rs.{tariff:.2f}/kWh", f"{energy_cost:.2f}"],
         ["Idle / overstay fee", f"{idle_minutes:.1f} billable min", f"{idle_fee:.2f}"],
         ["Total charged", "", f"{total:.2f}"],
     ]
+
     tbl2 = Table(cost_data, colWidths=[5*cm, 8*cm, 3*cm])
     tbl2.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
@@ -159,10 +160,11 @@ def download_invoice_pdf(
 
     if min_fee > 0:
         story.append(Paragraph(
-            f"<i>* A minimum session fee of ₹{min_fee:.2f} applies at this station. "
+            f"<i>* A minimum session fee of Rs. {min_fee:.2f} applies at this station. "
             "If the energy cost was below this floor, the minimum fee was charged instead.</i>",
             ParagraphStyle("note", parent=normal, fontSize=8, textColor=colors.grey)
         ))
+
 
     story.append(Spacer(1, 0.5*cm))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))

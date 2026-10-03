@@ -277,15 +277,26 @@ export function Sessions() {
                       e.preventDefault();
                       const url = `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1'}/invoices/${invoice.invoice_id}/pdf`;
                       fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-                        .then(r => r.blob())
+                        .then(r => {
+                          if (!r.ok) throw new Error('Invoice PDF not available');
+                          return r.blob();
+                        })
                         .then(blob => {
                           const a = document.createElement('a');
                           a.href = URL.createObjectURL(blob);
                           a.download = `electra-invoice-${invoice.invoice_id.slice(0, 8).toUpperCase()}.pdf`;
                           a.click();
+                        })
+                        .catch((pdfErr) => {
+                          pushToast({
+                            title: 'Download failed',
+                            message: getErrorMessage(pdfErr, 'Could not download invoice PDF.'),
+                            tone: 'error',
+                          });
                         });
                     }
                   }}
+
                 >
                   ↓ PDF
                 </a>
