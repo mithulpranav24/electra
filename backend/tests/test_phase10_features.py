@@ -328,9 +328,10 @@ def test_real_db_challenge_connected_then_disconnected():
         station_id = uuid.uuid4()
         port_id = uuid.uuid4()
         qr_token = uuid.uuid4()
+        qr_code = f"QR-CHAL-{uuid.uuid4().hex[:8]}"
 
-        db.execute(text("INSERT INTO COMPANIES (company_id, name) VALUES (:cid, 'Test Co') ON CONFLICT DO NOTHING"), {"cid": company_id})
-        db.execute(text("INSERT INTO AREAS (area_id, name) VALUES (:aid, 'Test Area') ON CONFLICT DO NOTHING"), {"aid": area_id})
+        db.execute(text("INSERT INTO COMPANIES (company_id, name) VALUES (:cid, :name)"), {"cid": company_id, "name": f"Chal Co {company_id}"})
+        db.execute(text("INSERT INTO AREAS (area_id, name) VALUES (:aid, :name)"), {"aid": area_id, "name": f"Chal Area {area_id}"})
         db.execute(text("""
             INSERT INTO STATIONS (station_id, company_id, area_id, name, gps_coordinates, price_per_kwh, minimum_session_fee, opening_time_local, closing_time_local, timezone)
             VALUES (:sid, :cid, :aid, 'Test Station', ST_SetSRID(ST_MakePoint(77.5946, 12.9716), 4326), 15.0, 50.0, '00:00:00', '23:59:59', 'UTC')
@@ -338,8 +339,8 @@ def test_real_db_challenge_connected_then_disconnected():
 
         db.execute(text("""
             INSERT INTO CHARGING_PORTS (port_id, station_id, qr_code, qr_token, connector_type, charger_type, status)
-            VALUES (:pid, :sid, 'QR-TEST-1', :qtok, 'CCS2', 'DC Fast', 'Charging')
-        """), {"pid": port_id, "sid": station_id, "qtok": qr_token})
+            VALUES (:pid, :sid, :qr, :qtok, 'CCS2', 'DC Fast', 'Charging')
+        """), {"pid": port_id, "sid": station_id, "qr": qr_code, "qtok": qr_token})
 
         ghost_user_id = uuid.uuid4()
         ghost_veh_id = uuid.uuid4()
@@ -349,17 +350,17 @@ def test_real_db_challenge_connected_then_disconnected():
         db.execute(text("""
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance)
             VALUES (:uid, :email, 'hash', 'Ghost Driver', '9999999991', 'Driver', 5000.00)
-        """), {"uid": ghost_user_id, "email": f"ghost_{ghost_user_id}@test.com"})
+        """), {"uid": ghost_user_id, "email": f"ghost_{ghost_user_id.hex}@test.com"})
         db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, 5000.00, 'Top-up')"), {"uid": ghost_user_id})
 
         db.execute(text("""
             INSERT INTO VEHICLES (vehicle_id, user_id, make, model, registration_number, battery_capacity, connector_type, is_active, is_default)
             VALUES (:vid, :uid, 'Tesla', 'Model 3', :reg, 60.0, 'CCS2', TRUE, TRUE)
-        """), {"vid": ghost_veh_id, "uid": ghost_user_id, "reg": f"GHOST-{str(ghost_user_id)[:4]}"})
+        """), {"vid": ghost_veh_id, "uid": ghost_user_id, "reg": f"GHOST-{ghost_user_id.hex[:8]}"})
 
         db.execute(text("""
-            INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, expires_at)
-            VALUES (:rid, :uid, :pid, :vid, 'Active', CURRENT_TIMESTAMP + INTERVAL '1 hour')
+            INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, reserved_tariff, expires_at)
+            VALUES (:rid, :uid, :pid, :vid, 'Active', 15.00, CURRENT_TIMESTAMP + INTERVAL '1 hour')
         """), {"rid": ghost_res_id, "uid": ghost_user_id, "pid": port_id, "vid": ghost_veh_id})
         db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type, reference_id) VALUES (:uid, -1000.00, 'Escrow Hold', :rid)"), {"uid": ghost_user_id, "rid": ghost_res_id})
 
@@ -373,13 +374,13 @@ def test_real_db_challenge_connected_then_disconnected():
         db.execute(text("""
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance)
             VALUES (:uid, :email, 'hash', 'Challenger Driver', '9999999992', 'Driver', 5000.00)
-        """), {"uid": challenger_id, "email": f"chal_{challenger_id}@test.com"})
+        """), {"uid": challenger_id, "email": f"chal_{challenger_id.hex}@test.com"})
         db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, 5000.00, 'Top-up')"), {"uid": challenger_id})
 
         db.execute(text("""
             INSERT INTO VEHICLES (vehicle_id, user_id, make, model, registration_number, battery_capacity, connector_type, is_active, is_default)
             VALUES (:vid, :uid, 'Tata', 'Nexon EV', :reg, 40.0, 'CCS2', TRUE, TRUE)
-        """), {"vid": challenger_veh_id, "uid": challenger_id, "reg": f"CHAL-{str(challenger_id)[:4]}"})
+        """), {"vid": challenger_veh_id, "uid": challenger_id, "reg": f"CHAL-{challenger_id.hex[:8]}"})
         db.commit()
 
         challenger_user = db.query(User).filter(User.user_id == challenger_id).first()
@@ -437,7 +438,7 @@ def test_real_db_handshake_timeout_refunds_all():
         db.execute(text("""
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance)
             VALUES (:uid, :email, 'hash', 'Timeout Driver', '9999999993', 'Driver', :bal)
-        """), {"uid": user_id, "email": f"timeout_{user_id}@test.com", "bal": initial_balance})
+        """), {"uid": user_id, "email": f"timeout_{user_id.hex}@test.com", "bal": initial_balance})
         db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, :bal, 'Top-up')"), {"uid": user_id, "bal": initial_balance})
 
         company_id = uuid.uuid4()
@@ -447,9 +448,10 @@ def test_real_db_handshake_timeout_refunds_all():
         veh_id = uuid.uuid4()
         res_id = uuid.uuid4()
         sess_id = uuid.uuid4()
+        qr_code = f"QR-TIM-{uuid.uuid4().hex[:8]}"
 
-        db.execute(text("INSERT INTO COMPANIES (company_id, name) VALUES (:cid, 'Timeout Co') ON CONFLICT DO NOTHING"), {"cid": company_id})
-        db.execute(text("INSERT INTO AREAS (area_id, name) VALUES (:aid, 'Timeout Area') ON CONFLICT DO NOTHING"), {"aid": area_id})
+        db.execute(text("INSERT INTO COMPANIES (company_id, name) VALUES (:cid, :name)"), {"cid": company_id, "name": f"Timeout Co {company_id}"})
+        db.execute(text("INSERT INTO AREAS (area_id, name) VALUES (:aid, :name)"), {"aid": area_id, "name": f"Timeout Area {area_id}"})
         db.execute(text("""
             INSERT INTO STATIONS (station_id, company_id, area_id, name, gps_coordinates, price_per_kwh, minimum_session_fee, opening_time_local, closing_time_local, timezone)
             VALUES (:sid, :cid, :aid, 'Timeout Station', ST_SetSRID(ST_MakePoint(77.5946, 12.9716), 4326), 15.0, 50.0, '00:00:00', '23:59:59', 'UTC')
@@ -457,17 +459,17 @@ def test_real_db_handshake_timeout_refunds_all():
 
         db.execute(text("""
             INSERT INTO CHARGING_PORTS (port_id, station_id, qr_code, connector_type, charger_type, status)
-            VALUES (:pid, :sid, 'QR-TIMEOUT-1', 'CCS2', 'DC Fast', 'Charging')
-        """), {"pid": port_id, "sid": station_id})
+            VALUES (:pid, :sid, :qr, 'CCS2', 'DC Fast', 'Charging')
+        """), {"pid": port_id, "sid": station_id, "qr": qr_code})
 
         db.execute(text("""
             INSERT INTO VEHICLES (vehicle_id, user_id, make, model, registration_number, battery_capacity, connector_type, is_active, is_default)
             VALUES (:vid, :uid, 'Tata', 'Nexon EV', :reg, 40.0, 'CCS2', TRUE, TRUE)
-        """), {"vid": veh_id, "uid": user_id, "reg": f"TIM-{str(user_id)[:4]}"})
+        """), {"vid": veh_id, "uid": user_id, "reg": f"TIM-{user_id.hex[:8]}"})
 
         db.execute(text("""
-            INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, expires_at)
-            VALUES (:rid, :uid, :pid, :vid, 'Active', CURRENT_TIMESTAMP + INTERVAL '1 hour')
+            INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, reserved_tariff, expires_at)
+            VALUES (:rid, :uid, :pid, :vid, 'Active', 15.00, CURRENT_TIMESTAMP + INTERVAL '1 hour')
         """), {"rid": res_id, "uid": user_id, "pid": port_id, "vid": veh_id})
 
         db.execute(text("""
@@ -519,7 +521,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
         db.execute(text("""
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance, created_at)
             VALUES (:uid, :email, 'hash', 'Trusted Driver', '9999999994', 'Driver', 20000.00, :created_at)
-        """), {"uid": user_id, "email": f"trusted_{user_id}@test.com", "created_at": now - timedelta(days=10)})
+        """), {"uid": user_id, "email": f"trusted_{user_id.hex}@test.com", "created_at": now - timedelta(days=10)})
         db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, 20000.00, 'Top-up')"), {"uid": user_id})
 
         company_id = uuid.uuid4()
@@ -528,9 +530,11 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
         port1_id = uuid.uuid4()
         port2_id = uuid.uuid4()
         veh_id = uuid.uuid4()
+        qr1 = f"QR-W1-{uuid.uuid4().hex[:8]}"
+        qr2 = f"QR-W2-{uuid.uuid4().hex[:8]}"
 
-        db.execute(text("INSERT INTO COMPANIES (company_id, name) VALUES (:cid, 'Waiver Co') ON CONFLICT DO NOTHING"), {"cid": company_id})
-        db.execute(text("INSERT INTO AREAS (area_id, name) VALUES (:aid, 'Waiver Area') ON CONFLICT DO NOTHING"), {"aid": area_id})
+        db.execute(text("INSERT INTO COMPANIES (company_id, name) VALUES (:cid, :name)"), {"cid": company_id, "name": f"Waiver Co {company_id}"})
+        db.execute(text("INSERT INTO AREAS (area_id, name) VALUES (:aid, :name)"), {"aid": area_id, "name": f"Waiver Area {area_id}"})
         db.execute(text("""
             INSERT INTO STATIONS (station_id, company_id, area_id, name, gps_coordinates, price_per_kwh, minimum_session_fee, opening_time_local, closing_time_local, timezone)
             VALUES (:sid, :cid, :aid, 'Waiver Station', ST_SetSRID(ST_MakePoint(77.5946, 12.9716), 4326), 15.0, 50.0, '00:00:00', '23:59:59', 'UTC')
@@ -538,21 +542,21 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
 
         db.execute(text("""
             INSERT INTO CHARGING_PORTS (port_id, station_id, qr_code, connector_type, charger_type, status)
-            VALUES (:p1, :sid, 'QR-WAIVER-1', 'CCS2', 'DC Fast', 'Available'),
-                   (:p2, :sid, 'QR-WAIVER-2', 'CCS2', 'DC Fast', 'Available')
-        """), {"p1": port1_id, "p2": port2_id, "sid": station_id})
+            VALUES (:p1, :sid, :qr1, 'CCS2', 'DC Fast', 'Available'),
+                   (:p2, :sid, :qr2, 'CCS2', 'DC Fast', 'Available')
+        """), {"p1": port1_id, "p2": port2_id, "sid": station_id, "qr1": qr1, "qr2": qr2})
 
         db.execute(text("""
             INSERT INTO VEHICLES (vehicle_id, user_id, make, model, registration_number, battery_capacity, connector_type, is_active, is_default)
             VALUES (:vid, :uid, 'Tata', 'Nexon EV', :reg, 40.0, 'CCS2', TRUE, TRUE)
-        """), {"vid": veh_id, "uid": user_id, "reg": f"WAIV-{str(user_id)[:4]}"})
+        """), {"vid": veh_id, "uid": user_id, "reg": f"WAIV-{user_id.hex[:8]}"})
 
         for i in range(3):
             past_res_id = uuid.uuid4()
             past_sess_id = uuid.uuid4()
             db.execute(text("""
-                INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, created_at, expires_at)
-                VALUES (:rid, :uid, :pid, :vid, 'Completed', :t, :t + INTERVAL '1 hour')
+                INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, reserved_tariff, created_at, expires_at)
+                VALUES (:rid, :uid, :pid, :vid, 'Completed', 15.00, :t, :t + INTERVAL '1 hour')
             """), {"rid": past_res_id, "uid": user_id, "pid": port1_id, "vid": veh_id, "t": now - timedelta(days=i+1)})
             db.execute(text("""
                 INSERT INTO CHARGING_SESSIONS (session_id, reservation_id, initial_battery_percentage, target_battery_percentage, applied_tariff, start_time, end_time, hardware_acked, hardware_state, is_aborted)
@@ -567,6 +571,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
         # Attempt 1: Reserve port 1, cancel with "Faulty Charger" -> waiver 1 granted
         res1 = create_reservation(ReservationCreate(port_id=port1_id, vehicle_id=veh_id), fastapi_req, db, user_obj)
         cancel_reservation(reservation_id=res1.reservation_id, cancel_req=CancelReservationRequest(reason="Faulty Charger"), db=db, current_user=user_obj)
+        db.refresh(user_obj)
 
         waiver1 = db.query(CooldownWaiver).filter(CooldownWaiver.reservation_id == res1.reservation_id).first()
         assert waiver1 is not None
@@ -578,6 +583,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
 
         # Cancel attempt 2 with "Blocked Bay" -> waiver 2 granted
         cancel_reservation(reservation_id=res2.reservation_id, cancel_req=CancelReservationRequest(reason="Blocked Bay"), db=db, current_user=user_obj)
+        db.refresh(user_obj)
         waiver2 = db.query(CooldownWaiver).filter(CooldownWaiver.reservation_id == res2.reservation_id).first()
         assert waiver2 is not None
 
@@ -586,6 +592,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
         assert res3 is not None
 
         cancel_reservation(reservation_id=res3.reservation_id, cancel_req=CancelReservationRequest(reason="Faulty Charger"), db=db, current_user=user_obj)
+        db.refresh(user_obj)
         waiver3 = db.query(CooldownWaiver).filter(CooldownWaiver.reservation_id == res3.reservation_id).first()
         assert waiver3 is None
 
@@ -610,7 +617,7 @@ def test_real_db_dashboard_real_kwh():
         db.execute(text("""
             INSERT INTO USERS (user_id, email, password_hash, full_name, phone_number, role, wallet_balance)
             VALUES (:uid, :email, 'hash', 'Dashboard Driver', '9999999995', 'Driver', 5000.00)
-        """), {"uid": user_id, "email": f"dash_{user_id}@test.com"})
+        """), {"uid": user_id, "email": f"dash_{user_id.hex}@test.com"})
         db.execute(text("INSERT INTO WALLET_TRANSACTIONS (user_id, amount, transaction_type) VALUES (:uid, 5000.00, 'Top-up')"), {"uid": user_id})
 
         company_id = uuid.uuid4()
@@ -620,9 +627,10 @@ def test_real_db_dashboard_real_kwh():
         veh_id = uuid.uuid4()
         res_id = uuid.uuid4()
         sess_id = uuid.uuid4()
+        qr_code = f"QR-DASH-{uuid.uuid4().hex[:8]}"
 
-        db.execute(text("INSERT INTO COMPANIES (company_id, name) VALUES (:cid, 'Dash Co') ON CONFLICT DO NOTHING"), {"cid": company_id})
-        db.execute(text("INSERT INTO AREAS (area_id, name) VALUES (:aid, 'Dash Area') ON CONFLICT DO NOTHING"), {"aid": area_id})
+        db.execute(text("INSERT INTO COMPANIES (company_id, name) VALUES (:cid, :name)"), {"cid": company_id, "name": f"Dash Co {company_id}"})
+        db.execute(text("INSERT INTO AREAS (area_id, name) VALUES (:aid, :name)"), {"aid": area_id, "name": f"Dash Area {area_id}"})
         db.execute(text("""
             INSERT INTO STATIONS (station_id, company_id, area_id, name, gps_coordinates, price_per_kwh, minimum_session_fee, opening_time_local, closing_time_local, timezone)
             VALUES (:sid, :cid, :aid, 'Dash Station', ST_SetSRID(ST_MakePoint(77.5946, 12.9716), 4326), 15.0, 50.0, '00:00:00', '23:59:59', 'UTC')
@@ -630,17 +638,17 @@ def test_real_db_dashboard_real_kwh():
 
         db.execute(text("""
             INSERT INTO CHARGING_PORTS (port_id, station_id, qr_code, connector_type, charger_type, status)
-            VALUES (:pid, :sid, 'QR-DASH-1', 'CCS2', 'DC Fast', 'Available')
-        """), {"pid": port_id, "sid": station_id})
+            VALUES (:pid, :sid, :qr, 'CCS2', 'DC Fast', 'Available')
+        """), {"pid": port_id, "sid": station_id, "qr": qr_code})
 
         db.execute(text("""
             INSERT INTO VEHICLES (vehicle_id, user_id, make, model, registration_number, battery_capacity, connector_type, is_active, is_default)
             VALUES (:vid, :uid, 'Tata', 'Nexon EV', :reg, 40.0, 'CCS2', TRUE, TRUE)
-        """), {"vid": veh_id, "uid": user_id, "reg": f"DASH-{str(user_id)[:4]}"})
+        """), {"vid": veh_id, "uid": user_id, "reg": f"DASH-{user_id.hex[:8]}"})
 
         db.execute(text("""
-            INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, expires_at)
-            VALUES (:rid, :uid, :pid, :vid, 'Completed', CURRENT_TIMESTAMP)
+            INSERT INTO RESERVATIONS (reservation_id, user_id, port_id, vehicle_id, status, reserved_tariff, expires_at)
+            VALUES (:rid, :uid, :pid, :vid, 'Completed', 15.00, CURRENT_TIMESTAMP)
         """), {"rid": res_id, "uid": user_id, "pid": port_id, "vid": veh_id})
 
         db.execute(text("""
