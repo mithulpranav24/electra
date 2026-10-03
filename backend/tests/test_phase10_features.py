@@ -570,7 +570,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
 
         # Attempt 1: Reserve port 1, cancel with "Faulty Charger" -> waiver 1 granted
         res1 = create_reservation(ReservationCreate(port_id=str(port1_id), vehicle_id=str(veh_id)), fastapi_req, db, user_obj)
-        cancel_reservation(reservation_id=res1.reservation_id, cancel_req=CancelReservationRequest(reason="Faulty Charger"), db=db, current_user=user_obj)
+        cancel_reservation(reservation_id=res1.reservation_id, fastapi_req=fastapi_req, cancel_req=CancelReservationRequest(reason="Faulty Charger"), db=db, current_user=user_obj)
         db.refresh(user_obj)
 
         waiver1 = db.query(CooldownWaiver).filter(CooldownWaiver.reservation_id == res1.reservation_id).first()
@@ -582,7 +582,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
         assert res2 is not None
 
         # Cancel attempt 2 with "Blocked Bay" -> waiver 2 granted
-        cancel_reservation(reservation_id=res2.reservation_id, cancel_req=CancelReservationRequest(reason="Blocked Bay"), db=db, current_user=user_obj)
+        cancel_reservation(reservation_id=res2.reservation_id, fastapi_req=fastapi_req, cancel_req=CancelReservationRequest(reason="Blocked Bay"), db=db, current_user=user_obj)
         db.refresh(user_obj)
         waiver2 = db.query(CooldownWaiver).filter(CooldownWaiver.reservation_id == res2.reservation_id).first()
         assert waiver2 is not None
@@ -591,7 +591,7 @@ def test_real_db_trusted_driver_cooldown_waiver_and_limit():
         res3 = create_reservation(ReservationCreate(port_id=str(port1_id), vehicle_id=str(veh_id)), fastapi_req, db, user_obj)
         assert res3 is not None
 
-        cancel_reservation(reservation_id=res3.reservation_id, cancel_req=CancelReservationRequest(reason="Faulty Charger"), db=db, current_user=user_obj)
+        cancel_reservation(reservation_id=res3.reservation_id, fastapi_req=fastapi_req, cancel_req=CancelReservationRequest(reason="Faulty Charger"), db=db, current_user=user_obj)
         db.refresh(user_obj)
         waiver3 = db.query(CooldownWaiver).filter(CooldownWaiver.reservation_id == res3.reservation_id).first()
         assert waiver3 is None
