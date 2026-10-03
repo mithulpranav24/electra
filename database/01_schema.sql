@@ -161,6 +161,7 @@ CREATE TABLE CHARGING_SESSIONS (
     hardware_acked BOOLEAN NOT NULL DEFAULT FALSE,
     hardware_ack_deadline TIMESTAMP,
     hardware_state VARCHAR(20) NOT NULL DEFAULT 'Disconnected',
+    is_aborted BOOLEAN NOT NULL DEFAULT FALSE,
     start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     idle_start_time TIMESTAMP,
     end_time TIMESTAMP,
@@ -168,6 +169,16 @@ CREATE TABLE CHARGING_SESSIONS (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_sessions_active ON CHARGING_SESSIONS(end_time) WHERE end_time IS NULL;
+
+CREATE TABLE COOLDOWN_WAIVERS (
+    waiver_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES USERS(user_id) ON DELETE CASCADE,
+    reservation_id UUID NOT NULL REFERENCES RESERVATIONS(reservation_id) ON DELETE CASCADE,
+    station_id UUID NOT NULL REFERENCES STATIONS(station_id) ON DELETE CASCADE,
+    reason VARCHAR(100),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_cooldown_waivers_user ON COOLDOWN_WAIVERS(user_id, created_at);
 
 CREATE TABLE INVOICES (
     invoice_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

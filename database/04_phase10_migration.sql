@@ -1,0 +1,34 @@
+-- 04_phase10_migration.sql
+-- Migration script to upgrade existing databases to Phase 10 schema
+
+-- Add qr_token and consecutive_handshake_failures to CHARGING_PORTS
+ALTER TABLE CHARGING_PORTS 
+ADD COLUMN IF NOT EXISTS consecutive_handshake_failures INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE CHARGING_PORTS 
+ADD COLUMN IF NOT EXISTS qr_token UUID NOT NULL DEFAULT uuid_generate_v4();
+
+-- Add hardware tracking and status columns to CHARGING_SESSIONS
+ALTER TABLE CHARGING_SESSIONS 
+ADD COLUMN IF NOT EXISTS hardware_acked BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE CHARGING_SESSIONS 
+ADD COLUMN IF NOT EXISTS hardware_ack_deadline TIMESTAMP;
+
+ALTER TABLE CHARGING_SESSIONS 
+ADD COLUMN IF NOT EXISTS hardware_state VARCHAR(20) NOT NULL DEFAULT 'Disconnected';
+
+ALTER TABLE CHARGING_SESSIONS 
+ADD COLUMN IF NOT EXISTS is_aborted BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Create COOLDOWN_WAIVERS table if it doesn't already exist
+CREATE TABLE IF NOT EXISTS COOLDOWN_WAIVERS (
+    waiver_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES USERS(user_id) ON DELETE CASCADE,
+    reservation_id UUID NOT NULL REFERENCES RESERVATIONS(reservation_id) ON DELETE CASCADE,
+    station_id UUID NOT NULL REFERENCES STATIONS(station_id) ON DELETE CASCADE,
+    reason VARCHAR(100),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_cooldown_waivers_user ON COOLDOWN_WAIVERS(user_id, created_at);

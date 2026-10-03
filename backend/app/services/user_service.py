@@ -86,26 +86,25 @@ class UserService:
         upcoming_res = db.query(Reservation).filter(Reservation.user_id == user_id, Reservation.status == 'Confirmed').count()
         unpaid_invoices = db.query(Invoice).filter(Invoice.user_id == user_id, Invoice.is_paid == False).count()
 
-        from sqlalchemy import func, case
-        from app.models.vehicle import Vehicle as _Vehicle
-
-        # Real total energy delivered across all completed sessions for this user.
-        # energy_delivered_kwh is computed, not stored; approximate from battery deltas.
-        total_kwh = db.query(
-            func.coalesce(
-                func.sum(
-                    (ChargingSession.target_battery_percentage - ChargingSession.initial_battery_percentage)
-                    / 100.0
-                    * _Vehicle.battery_capacity
-                ),
-                0.0
+        # Real total energy delivered across all completed, non-aborted sessions for this user
+        completed_sessions = (
+            db.query(ChargingSession, Vehicle, ChargingPort, Station)
+            .join(Reservation, ChargingSession.reservation_id == Reservation.reservation_id)
+            .join(Vehicle, Reservation.vehicle_id == Vehicle.vehicle_id)
+            .join(ChargingPort, Reservation.port_id == ChargingPort.port_id)
+            .join(Station, ChargingPort.station_id == Station.station_id)
+            .filter(
+                Reservation.user_id == user_id,
+                ChargingSession.end_time.isnot(None),
+                ChargingSession.is_aborted.is_(False),
             )
-        ).join(Reservation, ChargingSession.reservation_id == Reservation.reservation_id
-        ).join(_Vehicle, Reservation.vehicle_id == _Vehicle.vehicle_id
-        ).filter(
-            Reservation.user_id == user_id,
-            ChargingSession.end_time.isnot(None)
-        ).scalar()
+            .all()
+        )
+        total_kwh = sum(
+            float(compute_snapshot(s, v, p, st, s.end_time)["energy_delivered_kwh"])
+            for s, v, p, st in completed_sessions
+        )
+
 
         # Last 5 completed sessions with station/invoice info
         recent_sessions = (
@@ -116,12 +115,14 @@ class UserService:
             .outerjoin(Invoice, Invoice.charging_session_id == ChargingSession.session_id)
             .filter(
                 Reservation.user_id == user_id,
-                ChargingSession.end_time.isnot(None)
+                ChargingSession.end_time.isnot(None),
+                ChargingSession.is_aborted.is_(False),
             )
             .order_by(ChargingSession.end_time.desc())
             .limit(5)
             .all()
         )
+
 
         recent_activity = []
         for session, reservation, station, invoice in recent_sessions:

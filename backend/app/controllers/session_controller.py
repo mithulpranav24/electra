@@ -61,9 +61,10 @@ def stop_session(
 def hardware_ack(
     session_id: UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """FR-15: Mock hardware layer calls this within 60 seconds to confirm the charger is active.
-    Resets the port's consecutive_handshake_failures counter on success."""
+    Resets the port's consecutive_handshake_failures counter on success, records start_time, and starts billing."""
     from app.models.station import ChargingPort
     from app.models.reservation import Reservation
 
@@ -71,24 +72,47 @@ def hardware_ack(
     session = db.query(ChargingSession).filter(ChargingSession.session_id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    reservation = db.query(Reservation).filter(
+        Reservation.reservation_id == session.reservation_id
+    ).first()
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    if current_user.role not in ["Admin", "Operator"] and reservation.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You cannot acknowledge another driver's session")
+
     if session.hardware_acked:
         return {"success": True, "message": "Already acknowledged"}
     if session.hardware_ack_deadline and now > session.hardware_ack_deadline:
         raise HTTPException(status_code=408, detail="Hardware ack deadline expired. Session will be aborted by the background worker.")
 
     session.hardware_acked = True
+    session.hardware_state = "Connected"
+    session.start_time = now  # Billing strictly begins from the moment hardware handshake is acknowledged
 
     # Reset consecutive failures on the port on a successful ack
-    reservation = db.query(Reservation).filter(
-        Reservation.reservation_id == session.reservation_id
-    ).first()
-    if reservation:
-        port = db.query(ChargingPort).filter(ChargingPort.port_id == reservation.port_id).first()
-        if port:
-            port.consecutive_handshake_failures = 0
+    port = db.query(ChargingPort).filter(ChargingPort.port_id == reservation.port_id).first()
+    if port:
+        port.consecutive_handshake_failures = 0
 
     db.commit()
     return {"success": True, "message": "Hardware handshake confirmed. Billing has begun."}
+
+
+@router.post("/{session_id}/mock-disconnect")
+def mock_disconnect(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Mocks physical vehicle disconnect (State A) on an active session to test ghost session resolution."""
+    session = db.query(ChargingSession).filter(ChargingSession.session_id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.hardware_state = "Disconnected"
+    db.commit()
+    return {"success": True, "message": "Hardware state set to Disconnected (State A)"}
 
 
 @router.post("/challenge/{port_id}", response_model=ChallengePortResponse)
