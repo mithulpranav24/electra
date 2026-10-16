@@ -14,32 +14,42 @@ from app.core.config import settings
 
 router = APIRouter()
 
-def check_rate_limit(request: Request, endpoint: str, identifier: str = None):
-    if redis_client:
-        client_ip = request.client.host if request.client else "unknown"
-        
-        # Check IP
-        ip_key = f"rl:{endpoint}:ip:{client_ip}"
-        ip_attempts = redis_client.get(ip_key)
-        if ip_attempts and int(ip_attempts) >= 5:
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests")
-        
-        # Check Identifier
-        if identifier:
-            # Normalize email identifier
-            norm_identifier = identifier.strip().lower()
-            id_key = f"rl:{endpoint}:id:{norm_identifier}"
-            id_attempts = redis_client.get(id_key)
-            if id_attempts and int(id_attempts) >= 5:
-                raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests")
-            
-            redis_client.incr(id_key)
-            if not id_attempts:
-                redis_client.expire(id_key, 300)
+def _rate_limit_keys(request: Request, endpoint: str, identifier: str = None):
+    client_ip = request.client.host if request.client else "unknown"
+    keys = [f"rl:{endpoint}:ip:{client_ip}"]
+    if identifier:
+        # Normalize email identifier
+        keys.append(f"rl:{endpoint}:id:{identifier.strip().lower()}")
+    return keys
 
-        redis_client.incr(ip_key)
-        if not ip_attempts:
-            redis_client.expire(ip_key, 300)
+
+def check_rate_limit(request: Request, endpoint: str, identifier: str = None, count_attempt: bool = True):
+    """Reject the request once either the source IP or the account is over
+    its 5-per-5-minute budget.
+
+    With count_attempt=False the caller only reads the counters; it must call
+    record_failed_attempt() itself so that a *successful* request never spends
+    the budget. FR-1 throttles repeated failures, not legitimate traffic.
+    """
+    if redis_client:
+        for key in _rate_limit_keys(request, endpoint, identifier):
+            attempts = redis_client.get(key)
+            if attempts and int(attempts) >= 5:
+                raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests")
+        if count_attempt:
+            record_failed_attempt(request, endpoint, identifier)
+
+
+def record_failed_attempt(request: Request, endpoint: str, identifier: str = None):
+    if redis_client:
+        for key in _rate_limit_keys(request, endpoint, identifier):
+            if redis_client.incr(key) == 1:
+                redis_client.expire(key, 300)
+
+
+def clear_rate_limit(request: Request, endpoint: str, identifier: str = None):
+    if redis_client:
+        redis_client.delete(*_rate_limit_keys(request, endpoint, identifier))
 
 @router.post("/register", response_model=UserResponse)
 def register(request: Request, user_in: UserCreate, db: Session = Depends(get_db)):
@@ -48,17 +58,22 @@ def register(request: Request, user_in: UserCreate, db: Session = Depends(get_db
 
 @router.post("/login", response_model=Token)
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    check_rate_limit(request, "login", form_data.username)
+    check_rate_limit(request, "login", form_data.username, count_attempt=False)
     user = AuthService.authenticate_user(db, form_data.username, form_data.password)
     if not user:
+        record_failed_attempt(request, "login", form_data.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if not user.is_active:
+        record_failed_attempt(request, "login", form_data.username)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
-    
+
+    # A successful sign-in clears the failure budget rather than spending it.
+    clear_rate_limit(request, "login", form_data.username)
+
     access_token = create_access_token(data={"user_id": str(user.user_id), "role": user.role})
     log_audit_event(
         db,
