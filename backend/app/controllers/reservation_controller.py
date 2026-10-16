@@ -286,8 +286,27 @@ def create_reservation(
             raise HTTPException(status_code=409, detail="This port is pending maintenance and cannot be reserved")
         elif "scheduled maintenance" in error_msg:
             raise HTTPException(status_code=409, detail="This port has scheduled maintenance beginning too soon to complete check-in")
+        elif "cancellation cooldown" in error_msg:
+            raise HTTPException(status_code=400, detail="This station is in a short cooldown after your recent cancellation. Try again in a little while, or reserve at a different station.")
+        elif "Connector mismatch" in error_msg:
+            raise HTTPException(status_code=400, detail="This port's connector doesn't match the selected vehicle.")
+        elif "active session" in error_msg:
+            raise HTTPException(status_code=409, detail="This vehicle already has an active charging session.")
+        elif "unpaid invoices" in error_msg:
+            raise HTTPException(status_code=400, detail="Settle your outstanding invoices before reserving a new port.")
+        elif "waitlist offer" in error_msg:
+            raise HTTPException(status_code=409, detail="You currently hold an active waitlist offer. Confirm or decline it before reserving.")
+        elif "suspended" in error_msg:
+            raise HTTPException(status_code=403, detail="Your account is suspended. Settle any outstanding invoices to continue.")
+        elif "banned" in error_msg:
+            raise HTTPException(status_code=403, detail="Your account is temporarily banned from reserving.")
+        elif "closed or closing" in error_msg:
+            raise HTTPException(status_code=409, detail="This station is closed or closing too soon to meet the minimum charge SLA.")
         else:
-            raise HTTPException(status_code=400, detail=error_msg)
+            # Surface only the plpgsql RAISE text — never the raw SQL / CALL dump.
+            clean = error_msg.split("CONTEXT:")[0].split("[SQL:")[0]
+            clean = clean.replace("(psycopg2.errors.RaiseException)", "").strip()
+            raise HTTPException(status_code=400, detail=clean or "The reservation could not be completed.")
 
 @router.get("/active", response_model=List[ReservationResponse])
 def get_active_reservations(
