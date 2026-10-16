@@ -72,7 +72,7 @@ export function StartSessionModal({ open, onClose, onConfirm, isLoading = false,
         </Field>
         <Field label="QR code" hint="Scan or enter the code shown on the physical charger.">
           {({ id, describedBy }) => (
-            <div className="relative"><QrCode size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" /><input id={id} aria-describedby={describedBy} className="field-control field-control-leading" type="text" placeholder="e.g. PORT-A1-XXXX or scan" value={qrCode} onChange={(event) => setQrCode(event.target.value)} required /></div>
+            <div className="relative"><QrCode size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" /><input id={id} aria-describedby={describedBy} className="field-control field-control-leading" type="text" placeholder="e.g. PORT-A1-XXXX or scan" value={qrCode} onChange={(event) => setQrCode(event.target.value)} required={qrRequired} /></div>
           )}
         </Field>
 
