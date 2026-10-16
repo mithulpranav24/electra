@@ -10,7 +10,9 @@ from app.models.user import User
 from app.schemas.maintenance_schema import MaintenanceScheduleCreate, MaintenanceScheduleResponse
 from app.services.maintenance_service import MaintenanceService
 
-router = APIRouter(prefix="/maintenance", tags=["Maintenance"])
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute, prefix="/maintenance", tags=["Maintenance"])
 
 
 def _client_ip(request: Request) -> str:

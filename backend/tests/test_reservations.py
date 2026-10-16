@@ -8,7 +8,7 @@ from app.core.dependencies import get_db, get_current_user
 from app.models.user import User
 
 # Use TEST_DATABASE_URL if available, else fallback to standard local DB
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/electra_test")
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/electra_test")
 
 try:
     engine = create_engine(TEST_DATABASE_URL)

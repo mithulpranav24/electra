@@ -21,7 +21,7 @@ from app.schemas.reservation_schema import ReservationCreate, CancelReservationR
 from app.controllers.reservation_controller import create_reservation, cancel_reservation
 from app.workers.session_tasks import abort_timed_out_handshakes
 
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/electra_test")
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/electra_test")
 
 try:
     engine = create_engine(TEST_DATABASE_URL)

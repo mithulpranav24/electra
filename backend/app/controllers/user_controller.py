@@ -10,7 +10,9 @@ from typing import List
 from app.schemas.company import CompanyOperatorMembershipResponse
 from app.services.company_service import CompanyService
 
-router = APIRouter()
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute)
 
 @router.get("/me", response_model=UserResponse)
 def read_users_me(current_user: User = Depends(get_current_user)):

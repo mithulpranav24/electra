@@ -9,7 +9,9 @@ from app.models.user import User
 from app.schemas.rating_schema import RatingCreate, RatingResponse, StationRatingsResponse
 from app.services.rating_service import RatingService
 
-router = APIRouter(prefix="/ratings", tags=["Ratings"])
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute, prefix="/ratings", tags=["Ratings"])
 
 
 @router.post("/{station_id}", response_model=RatingResponse)

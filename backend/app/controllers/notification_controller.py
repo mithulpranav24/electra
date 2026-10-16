@@ -10,7 +10,9 @@ from app.models.user import User
 from app.schemas.notification_schema import NotificationResponse, UnreadCountResponse
 from app.services.notification_service import NotificationService
 
-router = APIRouter(prefix="/notifications", tags=["Notifications"])
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute, prefix="/notifications", tags=["Notifications"])
 
 
 @router.get("", response_model=List[NotificationResponse])

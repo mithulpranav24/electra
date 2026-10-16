@@ -7,7 +7,9 @@ from app.schemas.company import CompanyCreate, CompanyUpdate, CompanyResponse, C
 from app.services.company_service import CompanyService
 from app.models.user import User
 
-router = APIRouter()
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute)
 
 @router.post("/", response_model=CompanyResponse)
 def create_company(company_in: CompanyCreate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):

@@ -11,7 +11,9 @@ from app.schemas.reservation_schema import ReservationResponse
 from app.schemas.waitlist_schema import WaitlistJoinRequest, WaitlistStatusResponse
 from app.services.waitlist_service import OFFER_WINDOW_SECONDS, WaitlistService
 
-router = APIRouter(prefix="/waitlist", tags=["Waitlist"])
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute, prefix="/waitlist", tags=["Waitlist"])
 
 
 def _to_status_response(db: Session, entry) -> WaitlistStatusResponse:

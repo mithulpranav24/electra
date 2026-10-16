@@ -8,7 +8,9 @@ from app.models.user import User
 from app.schemas.vehicle import VehicleCreate, VehicleResponse, VehicleUpdate
 from app.services.vehicle_service import VehicleService
 
-router = APIRouter()
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute)
 
 @router.post("/", response_model=VehicleResponse)
 def create_vehicle(

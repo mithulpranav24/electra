@@ -10,7 +10,9 @@ from app.schemas.report_schema import AdminReportResponse, OperatorReportRespons
 from app.services.report_service import ReportService
 from app.services.station_service import StationService
 
-router = APIRouter()
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute)
 
 
 @router.get("/admin", response_model=AdminReportResponse)

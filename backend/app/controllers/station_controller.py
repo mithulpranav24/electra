@@ -7,7 +7,9 @@ from app.schemas.station import StationCreate, StationUpdate, StationResponse, C
 from app.services.station_service import StationService
 from app.models.user import User
 
-router = APIRouter()
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute)
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
