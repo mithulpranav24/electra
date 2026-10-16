@@ -27,6 +27,8 @@ function renderModal(overrides: Partial<React.ComponentProps<typeof ReservationM
     vehicles: [vehicle],
     selectedVehicleId: 'vehicle-1',
     onVehicleChange: vi.fn(),
+    graceMinutes: 15,
+    onGraceChange: vi.fn(),
     walletBalance: 1500,
     ...overrides,
   };

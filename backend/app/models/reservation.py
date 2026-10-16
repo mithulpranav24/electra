@@ -1,5 +1,6 @@
 import uuid
 from sqlalchemy import Column, String, Boolean, DateTime, Numeric, ForeignKey, func, text
+from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ENUM, UUID
 from app.core.database import Base
 
@@ -25,3 +26,27 @@ class Reservation(Base):
     # DD-02: expires_at is the authoritative expiry time (accounts for extensions)
     expires_at = Column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP + INTERVAL '15 minutes'"))
     created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+    # One-directional link to the reserved port so the API can surface the
+    # port's check-in QR code and the station name on the reservation itself.
+    port = relationship("ChargingPort")
+
+    @property
+    def port_qr_code(self):
+        return self.port.qr_code if self.port else None
+
+    @property
+    def port_qr_token(self):
+        return str(self.port.qr_token) if (self.port and self.port.qr_token) else None
+
+    @property
+    def connector_type(self):
+        return self.port.connector_type if self.port else None
+
+    @property
+    def charger_type(self):
+        return self.port.charger_type if self.port else None
+
+    @property
+    def station_name(self):
+        return self.port.station.name if (self.port and self.port.station) else None

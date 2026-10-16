@@ -55,12 +55,12 @@ def add_favorite(
     ).first()
     
     if existing:
-        return {"success": True, "message": "Already a favorite"}
-        
+        return {"message": "Already a favorite"}
+
     fav = Favorite(user_id=current_user.user_id, station_id=station_id)
     db.add(fav)
     db.commit()
-    return {"success": True, "message": "Added to favorites"}
+    return {"message": "Added to favorites"}
 
 @router.delete("/{station_id}")
 def remove_favorite(
@@ -77,4 +77,4 @@ def remove_favorite(
         db.delete(fav)
         db.commit()
         
-    return {"success": True, "message": "Removed from favorites"}
+    return {"message": "Removed from favorites"}

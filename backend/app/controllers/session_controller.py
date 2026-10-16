@@ -85,7 +85,7 @@ def hardware_ack(
         raise HTTPException(status_code=403, detail="Forbidden: You cannot acknowledge another driver's session")
 
     if session.hardware_acked:
-        return {"success": True, "message": "Already acknowledged"}
+        return {"message": "Already acknowledged"}
     if session.hardware_ack_deadline and now > session.hardware_ack_deadline:
         raise HTTPException(status_code=408, detail="Hardware ack deadline expired. Session will be aborted by the background worker.")
 
@@ -99,7 +99,7 @@ def hardware_ack(
         port.consecutive_handshake_failures = 0
 
     db.commit()
-    return {"success": True, "message": "Hardware handshake confirmed. Billing has begun."}
+    return {"message": "Hardware handshake confirmed. Billing has begun."}
 
 
 @router.post("/{session_id}/mock-disconnect")
@@ -126,7 +126,7 @@ def mock_disconnect(
 
     session.hardware_state = "Disconnected"
     db.commit()
-    return {"success": True, "message": "Hardware state set to Disconnected (State A)"}
+    return {"message": "Hardware state set to Disconnected (State A)"}
 
 
 

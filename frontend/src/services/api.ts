@@ -269,7 +269,7 @@ export const reservationService = {
     const { data } = await api.get<Reservation[]>('/reservations/active');
     return data;
   },
-  create: async (payload: { vehicle_id: string; port_id?: string; station_id?: string }): Promise<Reservation> => {
+  create: async (payload: { vehicle_id: string; port_id?: string; station_id?: string; grace_period_minutes?: number }): Promise<Reservation> => {
     const { data } = await api.post<Reservation>('/reservations', payload);
     return data;
   },

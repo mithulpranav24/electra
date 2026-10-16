@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { BatteryCharging, CalendarClock, Clock3, History, MapPinned, ReceiptText, XCircle } from 'lucide-react';
+import { BatteryCharging, CalendarClock, Clock3, Copy, History, MapPinned, QrCode, ReceiptText, XCircle } from 'lucide-react';
 import { invoiceService, reservationService, sessionService, waitlistService } from '../../services/api';
 import type { ChargingSessionStatus, Invoice, Reservation, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
@@ -185,6 +185,15 @@ export function Sessions() {
     }
   };
 
+  const handleCopyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      pushToast({ title: 'Check-in code copied', tone: 'success' });
+    } catch {
+      pushToast({ title: 'Couldn’t copy the code', message: 'Copy it manually instead.', tone: 'error' });
+    }
+  };
+
   const handleCancel = async () => {
     if (!cancelling) return;
     setIsCancelling(true);
@@ -194,7 +203,7 @@ export function Sessions() {
       setCancelling(null);
       setCancelReason('Standard');
       await loadReservations();
-      pushToast({ title: 'Reservation cancelled', message: res.message || 'Your wallet activity shows whether the escrow was refunded or forfeited.', tone: 'success' });
+      pushToast({ title: 'Reservation cancelled', message: res?.message || 'Your wallet activity shows whether the escrow was refunded or forfeited.', tone: 'success' });
     } catch (cancelError) {
       pushToast({ title: 'Couldn’t cancel the reservation', message: getErrorMessage(cancelError, 'The reservation state may have changed.'), tone: 'error' });
     } finally {
@@ -232,6 +241,7 @@ export function Sessions() {
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0">
                     <div className="mb-3 flex flex-wrap items-center gap-2"><Badge tone={statusTone(reservation.status)}>{reservation.status}</Badge><span className="font-data text-xs text-[var(--steel)]">Reservation {shortId(reservation.reservation_id)}</span></div>
+                    {reservation.station_name && <p className="mb-1 text-sm font-bold text-[var(--teal-dark)]">{reservation.station_name}{reservation.connector_type ? ` · ${reservation.connector_type}` : ''}</p>}
                     <h3 className="font-display text-xl font-bold">Arrive by {formatDateTime(reservation.expires_at)}</h3>
                     <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-[#78560b]"><Clock3 size={16} /> {arrivalLabel(reservation.expires_at)}</p>
                   </div>
@@ -245,10 +255,21 @@ export function Sessions() {
                   )}
                 </div>
                 <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Port</dt><dd className="font-data mt-1 truncate font-bold" title={reservation.port_id}>{shortId(reservation.port_id, 12)}</dd></div>
+                  <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Port</dt><dd className="font-data mt-1 truncate font-bold" title={reservation.port_id}>{reservation.charger_type ?? shortId(reservation.port_id, 12)}</dd></div>
                   <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Vehicle</dt><dd className="font-data mt-1 truncate font-bold" title={reservation.vehicle_id}>{shortId(reservation.vehicle_id, 12)}</dd></div>
                   <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Reserved tariff</dt><dd className="font-data mt-1 font-bold">{formatCurrency(reservation.reserved_tariff)}/kWh</dd></div>
                 </dl>
+                {reservation.status === 'Confirmed' && reservation.port_qr_code && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-dashed border-[var(--teal)]/40 bg-[var(--teal-soft)] p-3.5">
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-white text-[var(--teal-dark)]"><QrCode size={22} /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Port check-in code</p>
+                      <p className="font-data truncate text-sm font-bold text-[var(--ink)]" title={reservation.port_qr_code}>{reservation.port_qr_code}</p>
+                      <p className="mt-0.5 text-xs text-[var(--steel)]">This is the QR shown on the physical charger. It’s filled in for you when you start charging.</p>
+                    </div>
+                    <Button size="sm" variant="secondary" icon={<Copy size={15} />} onClick={() => void handleCopyCode(reservation.port_qr_code as string)}>Copy</Button>
+                  </div>
+                )}
               </article>
             ))}
           </div>
@@ -358,6 +379,7 @@ export function Sessions() {
         open={Boolean(startingReservation)}
         onClose={() => setStartingReservation(null)}
         onConfirm={(initialPercentage, targetPercentage, qrCode, latitude, longitude) => void handleStartSession(initialPercentage, targetPercentage, qrCode, latitude, longitude)}
+        portQrCode={startingReservation?.port_qr_code ?? startingReservation?.port_qr_token ?? ''}
         isLoading={isStartingSession}
       />
     </div>
