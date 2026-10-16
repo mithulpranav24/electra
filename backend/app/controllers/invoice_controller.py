@@ -18,7 +18,9 @@ from app.models.user import User
 from app.schemas.invoice_schema import InvoiceResponse
 from app.services.session_service import compute_snapshot
 
-router = APIRouter(prefix="/invoices", tags=["Invoices"])
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute, prefix="/invoices", tags=["Invoices"])
 
 
 @router.get("", response_model=List[InvoiceResponse])

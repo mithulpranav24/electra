@@ -14,7 +14,9 @@ from app.models.transient import Favorite
 from app.schemas.station import StationResponse
 from app.services.station_service import StationService
 
-router = APIRouter(prefix="/favorites", tags=["Favorites"])
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute, prefix="/favorites", tags=["Favorites"])
 
 class FavoriteResponse(BaseModel):
     favorite_id: UUID

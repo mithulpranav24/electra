@@ -12,7 +12,9 @@ from app.models.user import User
 import jwt
 from app.core.config import settings
 
-router = APIRouter()
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute)
 
 def _rate_limit_keys(request: Request, endpoint: str, identifier: str = None):
     client_ip = request.client.host if request.client else "unknown"

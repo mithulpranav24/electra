@@ -1,28 +1,8 @@
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Callable
-import json
 from app.core.config import settings
-
-class UniformResponseRoute(APIRoute):
-    def get_route_handler(self) -> Callable:
-        original_route_handler = super().get_route_handler()
-        async def custom_route_handler(request: Request) -> Response:
-            response = await original_route_handler(request)
-            if hasattr(response, "body") and getattr(response, "status_code", 200) < 400:
-                try:
-                    content = json.loads(response.body.decode())
-                    if isinstance(content, dict) and "success" in content:
-                        return response
-                    new_content = {"success": True, "data": content}
-                    # It's safer to re-create the JSONResponse to handle content-length headers correctly
-                    return JSONResponse(status_code=response.status_code, content=new_content)
-                except Exception:
-                    pass
-            return response
-        return custom_route_handler
+from app.core.response import UniformResponseRoute
 
 app = FastAPI(
     title="Electra Multi-Operator EV Charging API",
@@ -30,6 +10,8 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Routers set route_class at construction (see app/core/response.py); this
+# covers only the routes declared directly on `app`, such as /health.
 app.router.route_class = UniformResponseRoute
 
 @app.exception_handler(HTTPException)
@@ -60,24 +42,6 @@ def health_check():
     return {"status": "healthy", "environment": settings.environment}
 
 from app.controllers import auth_controller, user_controller, vehicle_controller, wallet_controller, company_controller, station_controller, search_controller, reservation_controller, favorite_controller, waitlist_controller, session_controller, invoice_controller, report_controller, notification_controller, rating_controller, maintenance_controller
-
-# Routers will be included here as they are developed
-auth_controller.router.route_class = UniformResponseRoute
-user_controller.router.route_class = UniformResponseRoute
-vehicle_controller.router.route_class = UniformResponseRoute
-wallet_controller.router.route_class = UniformResponseRoute
-company_controller.router.route_class = UniformResponseRoute
-station_controller.router.route_class = UniformResponseRoute
-search_controller.router.route_class = UniformResponseRoute
-reservation_controller.router.route_class = UniformResponseRoute
-favorite_controller.router.route_class = UniformResponseRoute
-waitlist_controller.router.route_class = UniformResponseRoute
-session_controller.router.route_class = UniformResponseRoute
-invoice_controller.router.route_class = UniformResponseRoute
-report_controller.router.route_class = UniformResponseRoute
-notification_controller.router.route_class = UniformResponseRoute
-rating_controller.router.route_class = UniformResponseRoute
-maintenance_controller.router.route_class = UniformResponseRoute
 
 app.include_router(auth_controller.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(user_controller.router, prefix="/api/v1/users", tags=["users"])

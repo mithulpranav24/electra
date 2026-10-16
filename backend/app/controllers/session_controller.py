@@ -18,7 +18,9 @@ from app.schemas.session_schema import (
 from app.services.session_service import SessionService
 from sqlalchemy.orm import Session
 
-router = APIRouter(prefix="/sessions", tags=["Sessions"])
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute, prefix="/sessions", tags=["Sessions"])
 
 
 @router.post("/start", response_model=SessionStatusResponse)

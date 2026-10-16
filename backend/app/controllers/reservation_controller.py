@@ -18,7 +18,9 @@ from app.services.audit_service import log_audit_event
 from app.services.notification_service import create_notification
 from app.services.waitlist_service import WaitlistService
 
-router = APIRouter(prefix="/reservations", tags=["Reservations"])
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute, prefix="/reservations", tags=["Reservations"])
 
 # DD-23 / DD-24: Escrow pre-authorization must be 1000 INR
 ESCROW_AMOUNT = Decimal("1000.00")

@@ -7,7 +7,9 @@ from app.schemas.wallet import PaymentMethodResponse, WalletTransactionResponse,
 from app.services.wallet_service import WalletService
 from app.models.user import User
 
-router = APIRouter()
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute)
 
 @router.get("/balance")
 def get_balance(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

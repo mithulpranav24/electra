@@ -14,7 +14,9 @@ from app.schemas.station import StationResponse
 from app.schemas.search_schema import SearchHistoryEntry, StationSearchRequest
 from app.services.station_service import StationService
 
-router = APIRouter(prefix="/search", tags=["Search"])
+from app.core.response import UniformResponseRoute
+
+router = APIRouter(route_class=UniformResponseRoute, prefix="/search", tags=["Search"])
 
 SEARCH_HISTORY_LIMIT = 20
 
