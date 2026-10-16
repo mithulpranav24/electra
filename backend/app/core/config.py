@@ -1,6 +1,13 @@
 import yaml
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+# Anchor config.yaml to the repository layout rather than the process CWD.
+# A bare open("../config.yaml") resolved against whatever directory the
+# process was launched from, so starting uvicorn anywhere other than
+# backend/ silently fell through to env vars with an empty database_url.
+CONFIG_PATH = Path(__file__).resolve().parents[3] / "config.yaml"
 
 class Settings(BaseSettings):
     database_url: str = ""
@@ -21,7 +28,7 @@ def get_settings() -> Settings:
     
     # Load from config.yaml if present to override or supplement
     try:
-        with open("../config.yaml", "r") as f:
+        with open(CONFIG_PATH, "r") as f:
             yaml_data = yaml.safe_load(f)
             if yaml_data:
                 db_config = yaml_data.get("database", {})
