@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BatteryCharging, CalendarClock, Clock3, Copy, History, MapPinned, QrCode, ReceiptText, XCircle } from 'lucide-react';
+import { useAuth } from '../../context/auth-context';
 import { invoiceService, reservationService, sessionService, waitlistService } from '../../services/api';
 import type { ChargingSessionStatus, Invoice, Reservation, WaitlistStatus } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
@@ -43,6 +44,7 @@ export function Sessions() {
   const [isStoppingSession, setIsStoppingSession] = useState(false);
   const [isPayingInvoices, setIsPayingInvoices] = useState(false);
   const { pushToast } = useToast();
+  const { refreshUser } = useAuth();
   const navigate = useNavigate();
 
   const loadReservations = useCallback(async () => {
@@ -59,12 +61,15 @@ export function Sessions() {
       setWaitlistStatus(waitlist);
       setActiveSession(session);
       setInvoices(invoiceList);
+      // Escrow holds, refunds, and invoice settlements all move the wallet
+      // balance; keep the sidebar balance card in sync whenever this reloads.
+      void refreshUser();
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Active reservations could not be loaded.'));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [refreshUser]);
 
   useEffect(() => { void loadReservations(); }, [loadReservations]);
 
