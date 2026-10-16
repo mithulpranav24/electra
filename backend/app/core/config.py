@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     enforce_qr_validation: bool = False
     enforce_proximity_check: bool = False
+    skip_password_check: bool = False
 
     class Config:
         env_file = ".env"
@@ -52,6 +53,7 @@ def get_settings() -> Settings:
                     settings.environment = app_config.get("environment", settings.environment)
                     settings.enforce_qr_validation = app_config.get("enforce_qr_validation", settings.enforce_qr_validation)
                     settings.enforce_proximity_check = app_config.get("enforce_proximity_check", settings.enforce_proximity_check)
+                    settings.skip_password_check = app_config.get("skip_password_check", settings.skip_password_check)
     except FileNotFoundError:
         pass # Fallback to env vars if yaml not found
 
