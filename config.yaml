@@ -17,3 +17,4 @@ app:
   jwt_algorithm: "HS256"
   jwt_expiration_hours: 24
   environment: "development"
+  skip_password_check: true
