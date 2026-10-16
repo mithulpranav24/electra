@@ -64,7 +64,7 @@ function StarRow({ value }: { value: number | null }) {
 
 export function StationDetails() {
   const { id = '' } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
   const { pushToast } = useToast();
   const [data, setData] = useState<StationPageData | null>(null);
@@ -173,6 +173,7 @@ export function StationDetails() {
     setIsConfirmingOffer(true);
     try {
       await waitlistService.confirmOffer(data.waitlistStatus.waitlist_id);
+      void refreshUser();
       pushToast({ title: 'Reservation confirmed', message: 'Your ₹1,000 escrow is held. Arrive and plug in within 15 minutes.', tone: 'success' });
       navigate('/driver/sessions');
     } catch (confirmError) {
@@ -229,6 +230,7 @@ export function StationDetails() {
     try {
       await reservationService.create({ port_id: selectedPort.port_id, vehicle_id: selectedVehicleId, grace_period_minutes: graceMinutes });
       setSelectedPort(null);
+      void refreshUser();
       pushToast({ title: 'Reservation confirmed', message: `Your ₹1,000 escrow is held. Arrive and plug in within ${graceMinutes} minutes.`, tone: 'success' });
       navigate('/driver/sessions');
     } catch (reserveError) {
@@ -249,6 +251,7 @@ export function StationDetails() {
         longitude: loc.lng,
       });
       setChallengingPort(null);
+      void refreshUser();
       pushToast({
         title: 'Port Challenge',
         message: res?.message || 'Port challenge processed successfully.',

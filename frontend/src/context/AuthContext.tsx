@@ -49,6 +49,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      setUser(await authService.getCurrentUser());
+    } catch (error) {
+      // A transient refresh failure must not flip the global loader or sign the
+      // user out — the displayed balance just stays until the next refresh.
+      console.error('Failed to refresh the signed-in user', error);
+    }
+  }, []);
+
   const login = useCallback((newToken: string) => {
     setIsLoading(true);
     setToken(newToken);
@@ -73,7 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     login,
     logout,
     fetchUser,
-  }), [fetchUser, isLoading, login, logout, token, user]);
+    refreshUser,
+  }), [fetchUser, isLoading, login, logout, refreshUser, token, user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

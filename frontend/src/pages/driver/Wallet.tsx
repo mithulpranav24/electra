@@ -26,7 +26,7 @@ export default function Wallet() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const { fetchUser } = useAuth();
+  const { refreshUser } = useAuth();
   const { pushToast } = useToast();
 
   const loadWallet = useCallback(async (showLoader = true) => {
@@ -60,7 +60,7 @@ export default function Wallet() {
     setIsSubmitting(true);
     try {
       await walletService.topUp(numericAmount);
-      await Promise.all([loadWallet(false), fetchUser()]);
+      await Promise.all([loadWallet(false), refreshUser()]);
       pushToast({ title: 'Wallet topped up', message: `${formatCurrency(numericAmount)} is now available for charging.`, tone: 'success' });
     } catch (topUpError) {
       setError(getErrorMessage(topUpError, 'The wallet could not be topped up.'));

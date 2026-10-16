@@ -9,6 +9,9 @@ export interface AuthContextType {
   login: (token: string) => void;
   logout: () => Promise<void>;
   fetchUser: () => Promise<void>;
+  /** Silently re-fetch the signed-in user (e.g. after a wallet balance change)
+   *  without toggling the global loading state or signing out on failure. */
+  refreshUser: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);

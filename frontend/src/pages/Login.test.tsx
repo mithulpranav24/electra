@@ -14,7 +14,7 @@ describe('Login', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useAuth).mockReturnValue({ token: null, isAuthenticated: false, user: null, isLoading: false, login, logout: vi.fn(), fetchUser: vi.fn() });
+    vi.mocked(useAuth).mockReturnValue({ token: null, isAuthenticated: false, user: null, isLoading: false, login, logout: vi.fn(), fetchUser: vi.fn(), refreshUser: vi.fn() });
   });
 
   it('preserves the email/password login contract and hydrates auth with the returned token', async () => {
