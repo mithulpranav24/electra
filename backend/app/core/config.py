@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 60
     environment: str = "development"
 
+    enforce_qr_validation: bool = False
+    enforce_proximity_check: bool = False
+
     class Config:
         env_file = ".env"
 
@@ -47,6 +50,8 @@ def get_settings() -> Settings:
                     settings.jwt_expiration_hours = app_config.get("jwt_expiration_hours", settings.jwt_expiration_hours)
                     settings.jwt_access_token_expire_minutes = app_config.get("jwt_access_token_expire_minutes", settings.jwt_access_token_expire_minutes)
                     settings.environment = app_config.get("environment", settings.environment)
+                    settings.enforce_qr_validation = app_config.get("enforce_qr_validation", settings.enforce_qr_validation)
+                    settings.enforce_proximity_check = app_config.get("enforce_proximity_check", settings.enforce_proximity_check)
     except FileNotFoundError:
         pass # Fallback to env vars if yaml not found
 

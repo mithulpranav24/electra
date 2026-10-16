@@ -4,6 +4,7 @@ import { Alert } from '../ui/Feedback';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Field } from '../ui/Field';
+import { featureFlags } from '../lib/feature-flags';
 import { getUserLocation } from '../lib/geo';
 
 interface StartSessionModalProps {
@@ -31,14 +32,21 @@ export function StartSessionModal({ open, onClose, onConfirm, isLoading = false,
   const handleStart = async () => {
     setIsLocating(true);
     try {
-      const loc = await getUserLocation();
-      onConfirm(initialPercentage, targetPercentage, qrCode, loc.lat, loc.lng);
+      let lat = 0;
+      let lng = 0;
+      if (featureFlags.enforceProximityCheck) {
+        const loc = await getUserLocation();
+        lat = loc.lat;
+        lng = loc.lng;
+      }
+      onConfirm(initialPercentage, targetPercentage, qrCode, lat, lng);
     } finally {
       setIsLocating(false);
     }
   };
 
-  const isValid = initialPercentage >= 0 && initialPercentage < 100 && targetPercentage > initialPercentage && targetPercentage <= 100 && qrCode.trim().length > 0;
+  const qrRequired = featureFlags.enforceQrValidation;
+  const isValid = initialPercentage >= 0 && initialPercentage < 100 && targetPercentage > initialPercentage && targetPercentage <= 100 && (!qrRequired || qrCode.trim().length > 0);
 
   return (
     <Dialog
@@ -64,7 +72,7 @@ export function StartSessionModal({ open, onClose, onConfirm, isLoading = false,
         </Field>
         <Field label="QR code" hint="Scan or enter the code shown on the physical charger.">
           {({ id, describedBy }) => (
-            <div className="relative"><QrCode size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" /><input id={id} aria-describedby={describedBy} className="field-control field-control-leading" type="text" placeholder="e.g. PORT-A1-XXXX or scan" value={qrCode} onChange={(event) => setQrCode(event.target.value)} required /></div>
+            <div className="relative"><QrCode size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--steel)]" /><input id={id} aria-describedby={describedBy} className="field-control field-control-leading" type="text" placeholder="e.g. PORT-A1-XXXX or scan" value={qrCode} onChange={(event) => setQrCode(event.target.value)} required={qrRequired} /></div>
           )}
         </Field>
 
@@ -75,7 +83,7 @@ export function StartSessionModal({ open, onClose, onConfirm, isLoading = false,
         )}
 
         <p className="text-sm leading-6 text-[var(--steel-dark)]">
-          Charging speed slows automatically above 80% to protect the battery. An energy pre-authorization hold is placed on your wallet based on the target you choose. Your GPS location is verified to be within 200m of the station.
+          Charging speed slows automatically above 80% to protect the battery. An energy pre-authorization hold is placed on your wallet based on the target you choose.
         </p>
       </div>
     </Dialog>

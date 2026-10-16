@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 from uuid import UUID
@@ -8,9 +8,9 @@ class SessionStartRequest(BaseModel):
     reservation_id: UUID
     initial_battery_percentage: Decimal
     target_battery_percentage: Decimal
-    qr_code: str = Field(..., min_length=1)  # FR-14: port's unique QR token scanned at the charger
-    latitude: Decimal  # FR-14: driver's current GPS latitude
-    longitude: Decimal  # FR-14: driver's current GPS longitude
+    qr_code: str = ""
+    latitude: Decimal = Decimal(0)
+    longitude: Decimal = Decimal(0)
 
 class SessionStatusResponse(BaseModel):
     session_id: UUID
@@ -35,9 +35,9 @@ class SessionStatusResponse(BaseModel):
 
 
 class ChallengePortRequest(BaseModel):
-    latitude: Decimal
-    longitude: Decimal
-    qr_code: str = Field(..., min_length=1)
+    latitude: Decimal = Decimal(0)
+    longitude: Decimal = Decimal(0)
+    qr_code: str = ""
     vehicle_id: Optional[UUID] = None
 
 

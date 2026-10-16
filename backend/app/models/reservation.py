@@ -27,9 +27,8 @@ class Reservation(Base):
     expires_at = Column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP + INTERVAL '15 minutes'"))
     created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
 
-    # One-directional link to the reserved port so the API can surface the
-    # port's check-in QR code and the station name on the reservation itself.
     port = relationship("ChargingPort")
+    vehicle = relationship("Vehicle")
 
     @property
     def port_qr_code(self):
@@ -50,3 +49,12 @@ class Reservation(Base):
     @property
     def station_name(self):
         return self.port.station.name if (self.port and self.port.station) else None
+
+    @property
+    def vehicle_name(self):
+        if not self.vehicle:
+            return None
+        parts = [p for p in (self.vehicle.make, self.vehicle.model) if p]
+        label = " ".join(parts) if parts else None
+        plate = self.vehicle.registration_number
+        return f"{label} ({plate})" if label else plate

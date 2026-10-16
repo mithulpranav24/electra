@@ -259,10 +259,11 @@ export function Sessions() {
                     </div>
                   )}
                 </div>
-                <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Port</dt><dd className="font-data mt-1 truncate font-bold" title={reservation.port_id}>{reservation.charger_type ?? shortId(reservation.port_id, 12)}</dd></div>
-                  <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Vehicle</dt><dd className="font-data mt-1 truncate font-bold" title={reservation.vehicle_id}>{shortId(reservation.vehicle_id, 12)}</dd></div>
-                  <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Reserved tariff</dt><dd className="font-data mt-1 font-bold">{formatCurrency(reservation.reserved_tariff)}/kWh</dd></div>
+                <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Charger</dt><dd className="font-data mt-1 truncate font-bold">{reservation.charger_type ?? 'N/A'}{reservation.connector_type ? ` · ${reservation.connector_type}` : ''}</dd></div>
+                  <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Station</dt><dd className="font-data mt-1 truncate font-bold">{reservation.station_name ?? 'N/A'}</dd></div>
+                  <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Vehicle</dt><dd className="font-data mt-1 truncate font-bold">{reservation.vehicle_name ?? shortId(reservation.vehicle_id, 12)}</dd></div>
+                  <div className="surface-muted p-3.5"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">Tariff</dt><dd className="font-data mt-1 font-bold">{formatCurrency(reservation.reserved_tariff)}/kWh</dd></div>
                 </dl>
                 {reservation.status === 'Confirmed' && reservation.port_qr_code && (
                   <div className="mt-3 flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-dashed border-[var(--teal)]/40 bg-[var(--teal-soft)] p-3.5">
