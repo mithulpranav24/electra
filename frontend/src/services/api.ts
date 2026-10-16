@@ -219,6 +219,10 @@ export const operatorService = {
   deletePort: async (portId: string): Promise<void> => {
     await api.delete(`/operator/stations/ports/${portId}`);
   },
+  getActiveReservations: async (companyId: string): Promise<Reservation[]> => {
+    const { data } = await api.get<Reservation[]>(`/operator/stations/company/${companyId}/reservations/active`);
+    return data;
+  },
 };
 
 export interface StationSearchPayload {
