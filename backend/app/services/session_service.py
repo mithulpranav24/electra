@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.invoice import Invoice
 from app.models.maintenance import MaintenanceSchedule
 from app.models.reservation import Reservation
@@ -204,14 +205,13 @@ class SessionService:
                     ChargingPort.port_id == reservation_pre.port_id
                 ).first()
                 if port:
-                    # Validate QR token matches the port's stable token
-                    if str(port.qr_token) != qr_code and port.qr_code != qr_code:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="QR code does not match this charging port. Please scan the correct port."
-                        )
-                    # GPS proximity check — must be within 200m
-                    if latitude is not None and longitude is not None:
+                    if settings.enforce_qr_validation:
+                        if str(port.qr_token) != qr_code and port.qr_code != qr_code:
+                            raise HTTPException(
+                                status_code=400,
+                                detail="QR code does not match this charging port. Please scan the correct port."
+                            )
+                    if settings.enforce_proximity_check and latitude is not None and longitude is not None:
                         result = db.execute(
                             text("""
                                 SELECT ST_DWithin(
@@ -716,21 +716,20 @@ class SessionService:
         if port.status != "Charging":
             raise HTTPException(status_code=400, detail=f"Port is currently {port.status}, not Charging")
 
-        # Geofence check: within 200m of station
         station = db.query(Station).filter(Station.station_id == port.station_id).first()
         if not station:
             raise HTTPException(status_code=404, detail="Station not found")
 
-        point = f"SRID=4326;POINT({longitude} {latitude})"
-        distance = db.execute(
-            text("SELECT ST_Distance(gps_coordinates, ST_GeogFromText(:point)) FROM stations WHERE station_id = :station_id"),
-            {"point": point, "station_id": str(station.station_id)},
-        ).scalar()
-        if distance is None or distance > 200:
-            raise HTTPException(status_code=400, detail="You must be within 200m of the station to challenge this port")
+        if settings.enforce_proximity_check:
+            point = f"SRID=4326;POINT({longitude} {latitude})"
+            distance = db.execute(
+                text("SELECT ST_Distance(gps_coordinates, ST_GeogFromText(:point)) FROM stations WHERE station_id = :station_id"),
+                {"point": point, "station_id": str(station.station_id)},
+            ).scalar()
+            if distance is None or distance > 200:
+                raise HTTPException(status_code=400, detail="You must be within 200m of the station to challenge this port")
 
-        # QR validation
-        if port.qr_token and str(qr_code).strip() != str(port.qr_token):
+        if settings.enforce_qr_validation and port.qr_token and str(qr_code).strip() != str(port.qr_token):
             raise HTTPException(status_code=400, detail="Scanned QR code does not match this charging port")
 
         # Find active session on this port

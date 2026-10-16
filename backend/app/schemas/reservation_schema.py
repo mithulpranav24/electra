@@ -32,5 +32,6 @@ class ReservationResponse(BaseModel):
     connector_type: Optional[str] = None
     charger_type: Optional[str] = None
     station_name: Optional[str] = None
+    vehicle_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

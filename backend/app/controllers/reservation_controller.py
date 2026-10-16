@@ -316,7 +316,8 @@ def get_active_reservations(
     clean_expired_reservations(db)
 
     reservations = db.query(Reservation).options(
-        joinedload(Reservation.port).joinedload(ChargingPort.station)
+        joinedload(Reservation.port).joinedload(ChargingPort.station),
+        joinedload(Reservation.vehicle),
     ).filter(
         Reservation.user_id == current_user.user_id,
         Reservation.status.in_(["Confirmed", "Active"])

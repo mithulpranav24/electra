@@ -87,6 +87,7 @@ export interface Reservation {
   connector_type?: string | null;
   charger_type?: string | null;
   station_name?: string | null;
+  vehicle_name?: string | null;
 }
 
 export interface ChargingSessionStatus {
