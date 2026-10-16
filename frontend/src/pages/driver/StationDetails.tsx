@@ -74,6 +74,7 @@ export function StationDetails() {
   const [isTogglingFavorite, setIsTogglingFavorite] = useState(false);
   const [selectedPort, setSelectedPort] = useState<ChargingPort | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
+  const [graceMinutes, setGraceMinutes] = useState(15);
   const [isReserving, setIsReserving] = useState(false);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
   const [waitlistVehicleId, setWaitlistVehicleId] = useState('');
@@ -183,6 +184,7 @@ export function StationDetails() {
 
   const openReservation = (port: ChargingPort) => {
     setSelectedPort(port);
+    setGraceMinutes(15);
     const compatible = data?.vehicles.filter((vehicle) => normalizeConnector(vehicle.connector_type) === normalizeConnector(port.connector_type)) ?? [];
     const preferred = compatible.find((vehicle) => vehicle.is_default) ?? compatible[0];
     setSelectedVehicleId(preferred ? vehicleId(preferred) : '');
@@ -225,9 +227,9 @@ export function StationDetails() {
     if (!selectedPort || !selectedVehicleId) return;
     setIsReserving(true);
     try {
-      await reservationService.create({ port_id: selectedPort.port_id, vehicle_id: selectedVehicleId });
+      await reservationService.create({ port_id: selectedPort.port_id, vehicle_id: selectedVehicleId, grace_period_minutes: graceMinutes });
       setSelectedPort(null);
-      pushToast({ title: 'Reservation confirmed', message: 'Your ₹1,000 escrow is held. Arrive and plug in within 15 minutes.', tone: 'success' });
+      pushToast({ title: 'Reservation confirmed', message: `Your ₹1,000 escrow is held. Arrive and plug in within ${graceMinutes} minutes.`, tone: 'success' });
       navigate('/driver/sessions');
     } catch (reserveError) {
       pushToast({ title: 'Couldn’t reserve the port', message: getErrorMessage(reserveError, 'The port may no longer be available.'), tone: 'error' });
@@ -249,7 +251,7 @@ export function StationDetails() {
       setChallengingPort(null);
       pushToast({
         title: 'Port Challenge',
-        message: res.message || 'Port challenge processed successfully.',
+        message: res?.message || 'Port challenge processed successfully.',
         tone: 'success',
       });
       await loadStation();
@@ -427,6 +429,8 @@ export function StationDetails() {
         vehicles={compatibleVehicles}
         selectedVehicleId={selectedVehicleId}
         onVehicleChange={setSelectedVehicleId}
+        graceMinutes={graceMinutes}
+        onGraceChange={setGraceMinutes}
         walletBalance={user?.wallet_balance ?? 0}
         isLoading={isReserving}
       />

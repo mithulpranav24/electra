@@ -7,6 +7,8 @@ import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Field } from '../ui/Field';
 
+const GRACE_WINDOW_OPTIONS = [15, 30, 45, 60, 90, 120] as const;
+
 interface ReservationModalProps {
   open: boolean;
   onClose: () => void;
@@ -17,11 +19,13 @@ interface ReservationModalProps {
   vehicles: Vehicle[];
   selectedVehicleId: string;
   onVehicleChange: (id: string) => void;
+  graceMinutes: number;
+  onGraceChange: (minutes: number) => void;
   walletBalance: number;
   isLoading?: boolean;
 }
 
-export function ReservationModal({ open, onClose, onConfirm, stationName, port, pricePerKwh, vehicles, selectedVehicleId, onVehicleChange, walletBalance, isLoading = false }: ReservationModalProps) {
+export function ReservationModal({ open, onClose, onConfirm, stationName, port, pricePerKwh, vehicles, selectedVehicleId, onVehicleChange, graceMinutes, onGraceChange, walletBalance, isLoading = false }: ReservationModalProps) {
   const hasFunds = walletBalance >= 1000;
   const canReserve = Boolean(port && selectedVehicleId && hasFunds);
 
@@ -56,6 +60,16 @@ export function ReservationModal({ open, onClose, onConfirm, stationName, port, 
           </Alert>
         )}
 
+        <Field label="Check-in window" hint="How long the port is held for you to arrive and plug in.">
+          {({ id, describedBy }) => (
+            <select id={id} aria-describedby={describedBy} className="field-control" value={graceMinutes} onChange={(event) => onGraceChange(Number(event.target.value))}>
+              {GRACE_WINDOW_OPTIONS.map((minutes) => (
+                <option key={minutes} value={minutes}>{minutes} minutes{minutes === 15 ? ' (standard)' : ''}</option>
+              ))}
+            </select>
+          )}
+        </Field>
+
         <dl className="grid gap-3 sm:grid-cols-3">
           <div className="surface-muted p-4">
             <dt className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]"><WalletCards size={15} /> Escrow hold</dt>
@@ -63,7 +77,7 @@ export function ReservationModal({ open, onClose, onConfirm, stationName, port, 
           </div>
           <div className="surface-muted p-4">
             <dt className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]"><Clock3 size={15} /> Arrival window</dt>
-            <dd className="font-data mt-1.5 text-lg font-bold">15 min</dd>
+            <dd className="font-data mt-1.5 text-lg font-bold">{graceMinutes} min</dd>
           </div>
           <div className="surface-muted p-4">
             <dt className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]"><ShieldCheck size={15} /> Tariff</dt>
@@ -72,7 +86,7 @@ export function ReservationModal({ open, onClose, onConfirm, stationName, port, 
         </dl>
 
         <p className="text-sm leading-6 text-[var(--steel-dark)]">
-          The escrow is held when the reservation is confirmed. Arrive and plug in within 15 minutes; otherwise the reservation expires and the escrow may be forfeited. Cancellation refunds depend on timing and your recent cancellation history.
+          The escrow is held when the reservation is confirmed. Arrive and plug in within your chosen {graceMinutes}-minute window; otherwise the reservation expires and the escrow may be forfeited. Cancellation refunds depend on timing and your recent cancellation history.
         </p>
       </div>
     </Dialog>

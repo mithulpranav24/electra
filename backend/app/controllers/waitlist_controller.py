@@ -67,7 +67,7 @@ def leave_waitlist(
 ):
     ip_address = fastapi_req.client.host if fastapi_req.client else "unknown"
     WaitlistService.leave_waitlist(db, current_user, ip_address)
-    return {"success": True, "message": "You have left the waitlist"}
+    return {"message": "You have left the waitlist"}
 
 
 @router.post("/{waitlist_id}/confirm", response_model=ReservationResponse)

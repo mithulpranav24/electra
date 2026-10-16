@@ -217,5 +217,5 @@ def pay_outstanding_invoices(
 
     user.is_suspended = False
     db.commit()
-    return {"success": True, "message": f"Settled {len(unpaid)} outstanding invoice(s)."}
+    return {"message": f"Settled {len(unpaid)} outstanding invoice(s)."}
 

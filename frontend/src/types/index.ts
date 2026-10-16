@@ -82,6 +82,11 @@ export interface Reservation {
   reserved_tariff: number;
   expires_at: string;
   created_at: string;
+  port_qr_code?: string | null;
+  port_qr_token?: string | null;
+  connector_type?: string | null;
+  charger_type?: string | null;
+  station_name?: string | null;
 }
 
 export interface ChargingSessionStatus {

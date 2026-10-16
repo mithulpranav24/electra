@@ -75,7 +75,6 @@ export function SearchStations() {
   }, []);
 
   const loadInitial = useCallback(async () => {
-    void runSearch('', false);
     const [recentResult, favoriteResult, historyResult] = await Promise.allSettled([
       searchService.getRecentStations(),
       favoriteService.getFavorites(),
@@ -84,16 +83,22 @@ export function SearchStations() {
     if (recentResult.status === 'fulfilled') setRecentStations(recentResult.value);
     if (favoriteResult.status === 'fulfilled') setFavorites(favoriteResult.value);
     if (historyResult.status === 'fulfilled') setSearchHistory(historyResult.value);
-  }, [runSearch]);
+  }, []);
 
   useEffect(() => { void loadInitial(); }, [loadInitial]);
+
+  // Filters apply live: re-run the search (debounced) whenever the connector or
+  // speed filter changes. This also drives the initial search on mount.
+  useEffect(() => {
+    const handle = setTimeout(() => { void runSearch(connectorType, fastOnly); }, 250);
+    return () => clearTimeout(handle);
+  }, [connectorType, fastOnly, runSearch]);
 
   const applyHistoryEntry = (entry: SearchHistoryEntry) => {
     const connector = entry.connector_type ?? '';
     const fast = Boolean(entry.min_power_kw && entry.min_power_kw >= 50);
     setConnectorType(connector);
     setFastOnly(fast);
-    void runSearch(connector, fast);
   };
 
   const handleClearHistory = async () => {
@@ -143,7 +148,7 @@ export function SearchStations() {
             <span className="flex items-center gap-2 text-sm font-bold"><Zap size={17} className="text-[var(--teal)]" /> Fast charging (50 kW+)</span>
           </label>
         </div>
-        <Button type="submit" variant="primary" size="lg" icon={<Search size={18} />} isLoading={isLoading}>Search stations</Button>
+        <Button type="submit" variant="primary" size="lg" icon={<Search size={18} />} isLoading={isLoading}>Refresh results</Button>
       </form>
 
       {recentSearchChips.length > 0 && (

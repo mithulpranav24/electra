@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from typing import List, Optional
 from decimal import Decimal
@@ -25,6 +25,9 @@ router = APIRouter(route_class=UniformResponseRoute, prefix="/reservations", tag
 # DD-23 / DD-24: Escrow pre-authorization must be 1000 INR
 ESCROW_AMOUNT = Decimal("1000.00")
 SLA_TIMEOUT_MINUTES = 15
+# DD-02: bounds for the driver-chosen check-in window
+MIN_GRACE_MINUTES = 15
+MAX_GRACE_MINUTES = 120
 # DD-24: Free cancellation window — reservation held for less than this is eligible
 FREE_CANCEL_HOLD_MINUTES = 5
 
@@ -130,6 +133,10 @@ def create_reservation(
     if existing:
         raise HTTPException(status_code=400, detail="You already have an active reservation")
 
+    # DD-02: driver-chosen check-in window, clamped to the allowed bounds.
+    grace_minutes = request.grace_period_minutes or SLA_TIMEOUT_MINUTES
+    grace_minutes = max(MIN_GRACE_MINUTES, min(MAX_GRACE_MINUTES, grace_minutes))
+
     # FR-9: Compute cooldown_minutes (trusted account waiver logic)
     # Target station determination:
     target_port_id = request.port_id
@@ -215,7 +222,7 @@ def create_reservation(
                 "p_user_id": current_user.user_id,
                 "p_port_id": target_port_id,
                 "p_vehicle_id": request.vehicle_id,
-                "p_grace_period_minutes": SLA_TIMEOUT_MINUTES,
+                "p_grace_period_minutes": grace_minutes,
                 "p_cooldown_minutes": cooldown_minutes,
                 "p_ip_address": str(ip_address)
             }
@@ -225,16 +232,26 @@ def create_reservation(
         # The SP commits the transaction implicitly? No, SPs in Postgres participate in the current transaction.
         # But wait, we shouldn't commit here if the SP fails.
         db.commit()
-        
-        new_res = db.query(Reservation).filter(
+
+        new_res = db.query(Reservation).options(
+            joinedload(Reservation.port).joinedload(ChargingPort.station)
+        ).filter(
             Reservation.user_id == current_user.user_id,
-            Reservation.port_id == request.port_id,
+            Reservation.port_id == target_port_id,
             Reservation.status == "Confirmed"
         ).order_by(Reservation.created_at.desc()).first()
-        
+
         if not new_res:
             raise HTTPException(status_code=500, detail="Failed to retrieve created reservation")
-            
+
+        # DD-02: honour the driver's chosen check-in window. The SP inserts with
+        # the 15-minute server default; override it from created_at so a longer
+        # window is reflected in expires_at (the authoritative expiry field).
+        if grace_minutes != SLA_TIMEOUT_MINUTES:
+            new_res.expires_at = new_res.created_at + timedelta(minutes=grace_minutes)
+            db.commit()
+            db.refresh(new_res)
+
         log_audit_event(
             db,
             user_id=current_user.user_id,
@@ -279,7 +296,9 @@ def get_active_reservations(
 ):
     clean_expired_reservations(db)
 
-    reservations = db.query(Reservation).filter(
+    reservations = db.query(Reservation).options(
+        joinedload(Reservation.port).joinedload(ChargingPort.station)
+    ).filter(
         Reservation.user_id == current_user.user_id,
         Reservation.status.in_(["Confirmed", "Active"])
     ).all()
@@ -461,7 +480,7 @@ def cancel_reservation(
         )
 
         db.commit()
-        return {"success": True, "message": response_message}
+        return {"message": response_message}
 
 
     except HTTPException as e:
