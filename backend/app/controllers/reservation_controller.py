@@ -287,7 +287,7 @@ def create_reservation(
         elif "scheduled maintenance" in error_msg:
             raise HTTPException(status_code=409, detail="This port has scheduled maintenance beginning too soon to complete check-in")
         elif "cancellation cooldown" in error_msg:
-            raise HTTPException(status_code=409, detail="This station is in a short cooldown after your recent cancellation. Try again in a little while, or reserve at a different station.")
+            raise HTTPException(status_code=400, detail="This station is in a short cooldown after your recent cancellation. Try again in a little while, or reserve at a different station.")
         elif "Connector mismatch" in error_msg:
             raise HTTPException(status_code=400, detail="This port's connector doesn't match the selected vehicle.")
         elif "active session" in error_msg:
