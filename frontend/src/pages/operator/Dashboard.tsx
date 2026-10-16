@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, CalendarClock, CircleOff, MapPin, Pencil, PlugZap, Plus, RadioTower, Star, Trash2, Wrench } from 'lucide-react';
+import { Building2, CalendarClock, CircleOff, Clock, MapPin, Pencil, PlugZap, Plus, RadioTower, Star, Trash2, Wrench } from 'lucide-react';
 import { authService, maintenanceService, operatorService, ratingService } from '../../services/api';
-import type { ChargingPort, CompanyMembership, MaintenanceSchedule, Station, StationRatingSummary } from '../../types';
+import type { ChargingPort, CompanyMembership, MaintenanceSchedule, Reservation, Station, StationRatingSummary } from '../../types';
 import { getErrorMessage } from '../../lib/errors';
 import { formatCurrency, formatDateTime, shortId } from '../../lib/format';
 import { MaintenanceDialog } from '../../components/operator/MaintenanceDialog';
@@ -38,6 +38,7 @@ export default function OperatorDashboard() {
   const [expandedMaintenanceStation, setExpandedMaintenanceStation] = useState<string | null>(null);
   const [completingMaintenanceId, setCompletingMaintenanceId] = useState<string | null>(null);
   const [ratingsByStation, setRatingsByStation] = useState<Record<string, StationRatingSummary>>({});
+  const [activeReservations, setActiveReservations] = useState<Reservation[]>([]);
   const { pushToast } = useToast();
 
   const loadStations = useCallback(async (targetCompanyId: string, showLoader = true) => {
@@ -52,6 +53,8 @@ export default function OperatorDashboard() {
       setRatingsByStation(Object.fromEntries(
         loadedStations.map((station, index) => [station.station_id, summaries[index]]).filter((entry): entry is [string, StationRatingSummary] => entry[1] !== null),
       ));
+      const reservations = await operatorService.getActiveReservations(targetCompanyId).catch(() => []);
+      setActiveReservations(reservations);
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Stations could not be loaded for this company.'));
     } finally {
@@ -166,6 +169,34 @@ export default function OperatorDashboard() {
               { label: 'Needs attention', value: metrics.attention, icon: Wrench, tone: metrics.attention ? 'bg-[var(--red-soft)] text-[var(--red)]' : 'bg-[var(--paper-muted)] text-[var(--steel)]' },
             ].map(({ label, value, icon: Icon, tone }) => <div key={label} className="surface flex items-center gap-4 p-4"><span className={`flex size-11 items-center justify-center rounded-full ${tone}`}><Icon size={20} /></span><div><p className="font-data text-2xl font-bold">{value}</p><p className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--steel)]">{label}</p></div></div>)}
           </section>
+
+          {activeReservations.length > 0 && (
+            <section className="surface overflow-hidden">
+              <div className="flex flex-col gap-3 border-b border-[var(--line)] p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+                <SectionHeader title="Active reservations" description={`${activeReservations.length} reservation${activeReservations.length === 1 ? '' : 's'} across your stations`} />
+              </div>
+              <div className="divide-y divide-[var(--line)]">
+                {activeReservations.map((reservation) => (
+                  <div key={reservation.reservation_id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-display font-bold">{reservation.station_name ?? 'Unknown station'}</span>
+                        <Badge tone={reservation.status === 'Active' ? 'success' : 'info'}>{reservation.status}</Badge>
+                        {reservation.connector_type && <Badge tone="neutral">{reservation.connector_type}</Badge>}
+                      </div>
+                      <p className="mt-1 text-sm text-[var(--steel-dark)]">
+                        Port {reservation.port_qr_code ?? shortId(reservation.port_id)} · {reservation.vehicle_name ?? shortId(reservation.vehicle_id)}
+                      </p>
+                      <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--steel)]">
+                        <Clock size={12} /> Expires {formatDateTime(reservation.expires_at)}
+                      </p>
+                    </div>
+                    <p className="shrink-0 font-data text-xs text-[var(--steel)]">Reserved {formatDateTime(reservation.created_at)}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="surface overflow-hidden">
             <div className="flex flex-col gap-3 border-b border-[var(--line)] p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6"><SectionHeader title="Stations" description={`Company ${shortId(companyId, 12)} · ${stations.length} station${stations.length === 1 ? '' : 's'}`} /><Button size="sm" variant="ghost" onClick={() => void refresh()}>Refresh</Button></div>
