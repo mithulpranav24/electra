@@ -247,8 +247,12 @@ export function Sessions() {
                   <div className="min-w-0">
                     <div className="mb-3 flex flex-wrap items-center gap-2"><Badge tone={statusTone(reservation.status)}>{reservation.status}</Badge><span className="font-data text-xs text-[var(--steel)]">Reservation {shortId(reservation.reservation_id)}</span></div>
                     {reservation.station_name && <p className="mb-1 text-sm font-bold text-[var(--teal-dark)]">{reservation.station_name}{reservation.connector_type ? ` · ${reservation.connector_type}` : ''}</p>}
-                    <h3 className="font-display text-xl font-bold">Arrive by {formatDateTime(reservation.expires_at)}</h3>
-                    <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-[#78560b]"><Clock3 size={16} /> {arrivalLabel(reservation.expires_at)}</p>
+                    {reservation.status !== 'Active' && (
+                      <>
+                        <h3 className="font-display text-xl font-bold">Arrive by {formatDateTime(reservation.expires_at)}</h3>
+                        <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-[#78560b]"><Clock3 size={16} /> {arrivalLabel(reservation.expires_at)}</p>
+                      </>
+                    )}
                   </div>
                   {reservation.status === 'Active' ? (
                     <Badge tone="warning">Charging in progress</Badge>
